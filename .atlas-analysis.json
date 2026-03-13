@@ -1,0 +1,164 @@
+{
+  "projectType": "saas",
+  "projectName": "SMyEG",
+  "projectDescription": "Geospatial Monitoring and Evaluation System for forest and land patrimony management with multi-organization support.",
+  "theme": "palm",
+  "primaryColor": "#22c55e",
+  "lightColor": "#86efac",
+  "darkColor": "#16a34a",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/authentication",
+              "features/organizations",
+              "features/forest-patrimony",
+              "features/geospatial-data",
+              "features/asset-measurements",
+              "features/analytics"
+            ]
+          },
+          {
+            "group": "User Guides",
+            "pages": [
+              "guides/user-management",
+              "guides/roles-permissions",
+              "guides/shapefile-import",
+              "guides/measurement-campaigns",
+              "guides/land-accounting"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment-variables",
+              "configuration/database-setup",
+              "configuration/workers"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Authentication",
+            "pages": [
+              "api/auth/overview",
+              "api/auth/login",
+              "api/auth/register",
+              "api/auth/password-reset"
+            ]
+          },
+          {
+            "group": "Users & Organizations",
+            "pages": [
+              "api/users/overview",
+              "api/organizations/overview",
+              "api/roles/overview"
+            ]
+          },
+          {
+            "group": "Forest Patrimony",
+            "pages": [
+              "api/forest/level2",
+              "api/forest/level3",
+              "api/forest/level4"
+            ]
+          },
+          {
+            "group": "Asset Measurements",
+            "pages": [
+              "api/assets/campaigns",
+              "api/assets/observations",
+              "api/assets/calculations"
+            ]
+          },
+          {
+            "group": "Geospatial",
+            "pages": [
+              "api/geo/import-jobs",
+              "api/geo/recalculation"
+            ]
+          },
+          {
+            "group": "System",
+            "pages": [
+              "api/audit/logs",
+              "api/config/settings"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Deployment",
+        "groups": [
+          {
+            "group": "Setup",
+            "pages": [
+              "deployment/overview",
+              "deployment/docker",
+              "deployment/pm2"
+            ]
+          },
+          {
+            "group": "Background Workers",
+            "pages": [
+              "deployment/workers/geo-worker",
+              "deployment/workers/asset-worker"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "deployment/monitoring",
+              "deployment/troubleshooting"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-organization tenant isolation",
+    "Role-based access control (RBAC)",
+    "Hierarchical forest patrimony management (5 levels)",
+    "Geospatial shapefile import and processing",
+    "Asset measurement campaigns and observations",
+    "Background workers for geo calculations",
+    "Land accounting and patrimony variations",
+    "Dashboard with analytics and metrics",
+    "Comprehensive audit logging",
+    "NextAuth v5 authentication"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/login",
+    "POST /api/auth/register",
+    "POST /api/auth/forgot-password",
+    "POST /api/auth/reset-password",
+    "GET /api/users",
+    "GET /api/organizations",
+    "GET /api/roles",
+    "GET /api/forest",
+    "POST /api/forest/import",
+    "GET /api/assets/measurement-campaigns",
+    "POST /api/assets/measurement-campaigns/import",
+    "GET /api/assets/measurement-observations",
+    "GET /api/assets/calculation-jobs",
+    "GET /api/audit",
+    "GET /api/config",
+    "GET /api/dashboard"
+  ]
+}
