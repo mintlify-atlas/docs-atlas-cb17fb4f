@@ -1,0 +1,558 @@
+---
+title: 'Role & Permission Management'
+description: 'API endpoints for managing roles and permissions in the SMyEG system'
+---
+
+## Overview
+
+The Role & Permission Management API provides endpoints to create, read, and update roles and their associated permissions. The system uses a flexible role-based access control (RBAC) model with module-based permissions.
+
+## Authentication
+
+All role endpoints require authentication. Access control:
+- **SUPER_ADMIN** and **ADMIN** roles have full access
+- Other users need specific permissions: `users:READ`, `users:CREATE`, `users:UPDATE`
+
+## Permission Model
+
+The system uses a three-tier permission model:
+```
+Module → Permission → Role
+```
+
+- **Modules**: Logical groupings of functionality (e.g., "users", "organizations", "forest-patrimony")
+- **Permissions**: Specific actions within a module (CREATE, READ, UPDATE, DELETE, EXPORT, ADMIN)
+- **Roles**: Collections of permissions assigned to users
+
+## Organization Scope
+
+- **System Roles**: `organizationId = null` - Available to all organizations (e.g., SUPER_ADMIN)
+- **Organization Roles**: `organizationId = <uuid>` - Scoped to specific organization
+- **Role Deduplication**: When listing roles, organization-specific roles take precedence over system roles with the same slug
+
+---
+
+## List Roles & Modules
+
+<CodeGroup>
+```bash GET /api/roles
+curl -X GET "https://api.smyeg.com/api/roles?organizationId=660e8400-e29b-41d4-a716-446655440001" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Retrieves all active roles and available modules with their permissions. Roles are deduplicated with organization-specific roles taking precedence.
+
+### Query Parameters
+
+<ParamField query="organizationId" type="string">
+  Filter roles by organization ID. Returns both system roles (organizationId = null) and organization-specific roles.
+</ParamField>
+
+### Response
+
+<ResponseField name="roles" type="Role[]" required>
+  Array of role objects
+  
+  <Expandable title="Role Object">
+    <ResponseField name="id" type="string" required>
+      UUID of the role
+    </ResponseField>
+    
+    <ResponseField name="name" type="string" required>
+      Display name of the role
+    </ResponseField>
+    
+    <ResponseField name="slug" type="string" required>
+      Uppercase slug identifier (e.g., "ADMIN", "VIEWER")
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Role description
+    </ResponseField>
+    
+    <ResponseField name="organizationId" type="string">
+      Organization UUID (null for system roles)
+    </ResponseField>
+    
+    <ResponseField name="organizationName" type="string">
+      Organization name (null for system roles)
+    </ResponseField>
+    
+    <ResponseField name="isSystemRole" type="boolean" required>
+      Whether this is a system-defined role
+    </ResponseField>
+    
+    <ResponseField name="permissions" type="Permission[]" required>
+      Array of permission assignments
+      
+      <Expandable title="Permission">
+        <ResponseField name="permissionId" type="string" required>
+          UUID of the permission
+        </ResponseField>
+        
+        <ResponseField name="moduleSlug" type="string" required>
+          Module slug (e.g., "users", "organizations")
+        </ResponseField>
+        
+        <ResponseField name="action" type="enum" required>
+          Permission action: `CREATE`, `READ`, `UPDATE`, `DELETE`, `EXPORT`, or `ADMIN`
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="modules" type="Module[]" required>
+  Array of available modules and their permissions
+  
+  <Expandable title="Module Object">
+    <ResponseField name="id" type="string" required>
+      UUID of the module
+    </ResponseField>
+    
+    <ResponseField name="name" type="string" required>
+      Display name of the module
+    </ResponseField>
+    
+    <ResponseField name="slug" type="string" required>
+      Module slug identifier
+    </ResponseField>
+    
+    <ResponseField name="actions" type="Action[]" required>
+      Available actions (permissions) for this module
+      
+      <Expandable title="Action">
+        <ResponseField name="permissionId" type="string" required>
+          UUID of the permission
+        </ResponseField>
+        
+        <ResponseField name="action" type="enum" required>
+          Action type: `CREATE`, `READ`, `UPDATE`, `DELETE`, `EXPORT`, or `ADMIN`
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json Response
+{
+  "roles": [
+    {
+      "id": "880e8400-e29b-41d4-a716-446655440003",
+      "name": "Administrator",
+      "slug": "ADMIN",
+      "description": "Full organization administration",
+      "organizationId": "660e8400-e29b-41d4-a716-446655440001",
+      "organizationName": "Acme Corporation",
+      "isSystemRole": false,
+      "permissions": [
+        {
+          "permissionId": "aa0e8400-e29b-41d4-a716-446655440010",
+          "moduleSlug": "users",
+          "action": "CREATE"
+        },
+        {
+          "permissionId": "aa0e8400-e29b-41d4-a716-446655440011",
+          "moduleSlug": "users",
+          "action": "READ"
+        },
+        {
+          "permissionId": "aa0e8400-e29b-41d4-a716-446655440012",
+          "moduleSlug": "users",
+          "action": "UPDATE"
+        }
+      ]
+    },
+    {
+      "id": "990e8400-e29b-41d4-a716-446655440020",
+      "name": "Super Administrator",
+      "slug": "SUPER_ADMIN",
+      "description": "System-wide administrator",
+      "organizationId": null,
+      "organizationName": null,
+      "isSystemRole": true,
+      "permissions": [
+        {
+          "permissionId": "bb0e8400-e29b-41d4-a716-446655440030",
+          "moduleSlug": "organizations",
+          "action": "ADMIN"
+        }
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "id": "cc0e8400-e29b-41d4-a716-446655440040",
+      "name": "Users",
+      "slug": "users",
+      "actions": [
+        {
+          "permissionId": "aa0e8400-e29b-41d4-a716-446655440010",
+          "action": "CREATE"
+        },
+        {
+          "permissionId": "aa0e8400-e29b-41d4-a716-446655440011",
+          "action": "READ"
+        },
+        {
+          "permissionId": "aa0e8400-e29b-41d4-a716-446655440012",
+          "action": "UPDATE"
+        },
+        {
+          "permissionId": "aa0e8400-e29b-41d4-a716-446655440013",
+          "action": "DELETE"
+        }
+      ]
+    },
+    {
+      "id": "dd0e8400-e29b-41d4-a716-446655440050",
+      "name": "Organizations",
+      "slug": "organizations",
+      "actions": [
+        {
+          "permissionId": "bb0e8400-e29b-41d4-a716-446655440030",
+          "action": "CREATE"
+        },
+        {
+          "permissionId": "bb0e8400-e29b-41d4-a716-446655440031",
+          "action": "READ"
+        },
+        {
+          "permissionId": "bb0e8400-e29b-41d4-a716-446655440032",
+          "action": "UPDATE"
+        }
+      ]
+    }
+  ]
+}
+```
+</ResponseExample>
+
+---
+
+## Create Role
+
+<CodeGroup>
+```bash POST /api/roles
+curl -X POST "https://api.smyeg.com/api/roles" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Data Analyst",
+    "slug": "data_analyst",
+    "description": "Can view and export data"
+  }'
+```
+</CodeGroup>
+
+Creates a new role within the current user's organization.
+
+### Required Permissions
+
+- **SUPER_ADMIN** or **ADMIN** role, OR
+- `users:CREATE` permission
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Display name for the role (will be trimmed)
+</ParamField>
+
+<ParamField body="slug" type="string" required>
+  Slug identifier. Will be normalized to uppercase with underscores (e.g., "data analyst" → "DATA_ANALYST")
+</ParamField>
+
+<ParamField body="description" type="string">
+  Optional description of the role
+</ParamField>
+
+### Slug Normalization
+
+The system automatically normalizes slugs:
+- Converts to uppercase
+- Replaces spaces with underscores
+- Removes non-alphanumeric characters except underscores
+
+Examples:
+- `"data analyst"` → `"DATA_ANALYST"`
+- `"my-custom-role"` → `"MY_CUSTOM_ROLE"`
+- `"viewer@org"` → `"VIEWER_ORG"`
+
+### Response
+
+Returns the created role object with status code `201`.
+
+<ResponseField name="id" type="string" required>
+  UUID of the created role
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Role name
+</ResponseField>
+
+<ResponseField name="slug" type="string" required>
+  Normalized slug
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Role description
+</ResponseField>
+
+<ResponseField name="organizationId" type="string">
+  Organization UUID (inherited from current user)
+</ResponseField>
+
+<ResponseField name="isSystemRole" type="boolean" required>
+  Always `false` for user-created roles
+</ResponseField>
+
+<ResponseField name="isActive" type="boolean" required>
+  Always `true` for newly created roles
+</ResponseField>
+
+<ResponseField name="createdAt" type="string" required>
+  ISO 8601 timestamp of role creation
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string" required>
+  ISO 8601 timestamp of last update
+</ResponseField>
+
+<ResponseExample>
+```json Response
+{
+  "id": "ff0e8400-e29b-41d4-a716-446655440060",
+  "name": "Data Analyst",
+  "slug": "DATA_ANALYST",
+  "description": "Can view and export data",
+  "organizationId": "660e8400-e29b-41d4-a716-446655440001",
+  "isSystemRole": false,
+  "isActive": true,
+  "createdAt": "2024-03-13T10:30:00Z",
+  "updatedAt": "2024-03-13T10:30:00Z"
+}
+```
+</ResponseExample>
+
+### Error Responses
+
+<ResponseField name="409 Conflict">
+  Role with same slug already exists in organization
+  ```json
+  {
+    "error": "Ya existe un rol con ese slug"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="400 Bad Request">
+  Missing required fields
+  ```json
+  {
+    "error": "name y slug son obligatorios"
+  }
+  ```
+</ResponseField>
+
+---
+
+## Update Role Permissions
+
+<CodeGroup>
+```bash PATCH /api/roles
+curl -X PATCH "https://api.smyeg.com/api/roles" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "roleId": "ff0e8400-e29b-41d4-a716-446655440060",
+    "permissionIds": [
+      "aa0e8400-e29b-41d4-a716-446655440011",
+      "bb0e8400-e29b-41d4-a716-446655440031"
+    ]
+  }'
+```
+</CodeGroup>
+
+Updates the permissions assigned to a role. This operation replaces all existing permissions with the provided list.
+
+### Required Permissions
+
+- **SUPER_ADMIN** or **ADMIN** role, OR
+- `users:UPDATE` permission
+
+### Request Body
+
+<ParamField body="roleId" type="string" required>
+  UUID of the role to update
+</ParamField>
+
+<ParamField body="permissionIds" type="string[]" required>
+  Array of permission UUIDs to assign. Pass empty array to remove all permissions.
+</ParamField>
+
+### Behavior
+
+1. **Permission Validation**: Only valid permission IDs are processed
+2. **Deduplication**: Duplicate permission IDs are automatically removed
+3. **Replacement**: Existing permissions not in the list are removed
+4. **Creation**: New permissions are added with `skipDuplicates: true`
+5. **Transaction**: All operations occur within a database transaction
+
+### Response
+
+<ResponseField name="roleId" type="string" required>
+  UUID of the updated role
+</ResponseField>
+
+<ResponseField name="permissionIds" type="string[]" required>
+  Array of successfully assigned permission UUIDs (validated and deduplicated)
+</ResponseField>
+
+<ResponseExample>
+```json Response
+{
+  "roleId": "ff0e8400-e29b-41d4-a716-446655440060",
+  "permissionIds": [
+    "aa0e8400-e29b-41d4-a716-446655440011",
+    "bb0e8400-e29b-41d4-a716-446655440031"
+  ]
+}
+```
+</ResponseExample>
+
+### Error Responses
+
+<ResponseField name="404 Not Found">
+  Role not found
+  ```json
+  {
+    "error": "Rol no encontrado"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="400 Bad Request">
+  Missing roleId
+  ```json
+  {
+    "error": "roleId es obligatorio"
+  }
+  ```
+</ResponseField>
+
+---
+
+## Data Models
+
+### Role Model (Prisma Schema)
+
+```typescript
+model Role {
+  id              String           @id @default(uuid()) @db.Uuid
+  organizationId  String?          @db.Uuid
+  name            String           @db.VarChar(100)
+  slug            String           @db.VarChar(100)
+  description     String?
+  isSystemRole    Boolean          @default(false)
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  organization    Organization?    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+
+  @@unique([organizationId, slug])
+}
+```
+
+### Permission Model (Prisma Schema)
+
+```typescript
+model Permission {
+  id              String           @id @default(uuid()) @db.Uuid
+  moduleId        String           @db.Uuid
+  action          PermissionAction
+  name            String           @db.VarChar(150)
+  description     String?
+  createdAt       DateTime         @default(now())
+  module          Module           @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  rolePermissions RolePermission[]
+
+  @@unique([moduleId, action])
+}
+```
+
+### Module Model (Prisma Schema)
+
+```typescript
+model Module {
+  id           String       @id @default(uuid()) @db.Uuid
+  name         String       @unique @db.VarChar(100)
+  slug         String       @unique @db.VarChar(100)
+  description  String?
+  icon         String?      @db.VarChar(100)
+  routePath    String?      @db.VarChar(255)
+  isActive     Boolean      @default(true)
+  displayOrder Int          @default(0)
+  parentId     String?      @db.Uuid
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  parent       Module?      @relation("ModuleHierarchy", fields: [parentId], references: [id])
+  children     Module[]     @relation("ModuleHierarchy")
+  permissions  Permission[]
+}
+```
+
+### RolePermission Junction (Prisma Schema)
+
+```typescript
+model RolePermission {
+  id           String     @id @default(uuid()) @db.Uuid
+  roleId       String     @db.Uuid
+  permissionId String     @db.Uuid
+  grantedAt    DateTime   @default(now())
+  grantedBy    String?    @db.Uuid
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+```
+
+### PermissionAction Enum
+
+```typescript
+enum PermissionAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  EXPORT
+  ADMIN
+}
+```
+
+---
+
+## Audit Trail
+
+Role creation operations are logged in the `AuditLog` table with:
+- Action: `CREATE`
+- Entity Type: `Role`
+- Entity ID: Created role's UUID
+- User ID: ID of the user who performed the action
+- New Values: Role name and slug
+
+---
+
+## Best Practices
+
+1. **Role Naming**: Use clear, descriptive names that reflect the role's purpose
+2. **Slug Convention**: Use uppercase with underscores (e.g., `DATA_ANALYST`, `FIELD_SUPERVISOR`)
+3. **Least Privilege**: Assign only the minimum permissions required for the role
+4. **System Roles**: Never modify or delete system roles (isSystemRole = true)
+5. **Permission Granularity**: Combine permissions thoughtfully - avoid overly permissive roles
+6. **Organization Scope**: Remember that roles are organization-scoped unless they're system roles
+7. **Deduplication**: When querying roles, organization-specific roles override system roles with the same slug

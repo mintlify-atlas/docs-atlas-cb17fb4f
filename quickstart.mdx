@@ -1,80 +1,220 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Get up and running with SMyEG in 5 minutes"
 ---
 
-## Get started in three steps
+This guide will help you set up SMyEG and get your first organization running quickly.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before you begin, ensure you have the following installed:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+- **Node.js 20+** - [Download here](https://nodejs.org/)
+- **Docker** (recommended) - [Download here](https://www.docker.com/)
+
+## Setup Steps
+
+<Steps>
+  <Step title="Install dependencies">
+    Clone the repository and install dependencies:
+
+    <CodeGroup>
+    ```bash npm
+    npm install
+    ```
+
+    ```bash pnpm
+    pnpm install
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Start Docker services">
+    Start PostgreSQL and Redis using Docker Compose:
+
+    ```bash
+    docker compose up -d
+    ```
+
+    This starts:
+    - PostgreSQL 16 with PostGIS extensions (port 5432)
+    - Redis 7 (port 6379)
+  </Step>
+
+  <Step title="Configure environment variables">
+    Create a `.env` file in the project root with the following variables:
+
+    ```bash .env
+    # Database
+    DATABASE_URL="postgresql://postgres:postgres@localhost:5432/smyeg"
+
+    # NextAuth
+    NEXTAUTH_SECRET="your-secret-key-here"
+    NEXTAUTH_URL="http://localhost:3000"
+
+    # Node Environment
+    NODE_ENV="development"
+    ```
+
+    <Warning>
+    Generate a secure `NEXTAUTH_SECRET` using:
+    ```bash
+    openssl rand -base64 32
+    ```
+    </Warning>
+  </Step>
+
+  <Step title="Generate Prisma client">
+    Generate the Prisma client from the schema:
+
+    ```bash
+    npm run db:generate
+    ```
+  </Step>
+
+  <Step title="Run database migrations">
+    Apply database migrations to create tables and extensions:
+
+    ```bash
+    npm run db:migrate
+    ```
+
+    This creates:
+    - All database tables from the Prisma schema
+    - PostGIS extensions for geospatial data
+    - Partitioned audit log tables
+    - Database triggers for geometry calculations
+  </Step>
+
+  <Step title="Seed the database">
+    Load initial data including the admin user and default organization:
+
+    ```bash
+    npm run db:seed
+    ```
+
+    This creates:
+    - Default organization: "Por defecto"
+    - System modules and permissions
+    - Admin role with full permissions
+    - Admin user account
+  </Step>
+
+  <Step title="Start the development server">
+    Run the Next.js development server:
+
+    ```bash
+    npm run dev
+    ```
+
+    The application will be available at [http://localhost:3000](http://localhost:3000)
+  </Step>
+
+  <Step title="Login and create your first organization">
+    1. Navigate to [http://localhost:3000](http://localhost:3000)
+    2. Login with the default admin credentials:
+       - **Email**: `admin@example.com`
+       - **Password**: `Admin1234`
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    <Warning>
+    Change the admin password immediately after first login for security.
+    </Warning>
+
+    3. Once logged in, navigate to **Organizations** in the sidebar
+    4. Click **Create Organization** and fill in:
+       - Organization name
+       - RIF (tax ID)
+       - Country (optional)
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    5. Your new organization is now ready to use!
+  </Step>
+</Steps>
 
-### Step 2: Deploy your changes
+## Next Steps
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+Now that you have SMyEG running, explore these features:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Set up users" icon="users" href="/guides/user-management">
+    Create user accounts and assign roles
+  </Card>
+  <Card title="Import geospatial data" icon="map" href="/guides/shapefile-import">
+    Import shapefiles for forest patrimony Level 4
+  </Card>
+  <Card title="Configure workers" icon="gears" href="/configuration/workers">
+    Set up background workers for geospatial processing
+  </Card>
+  <Card title="Explore the API" icon="code" href="/api/auth/overview">
+    Learn about the REST API endpoints
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Optional: Start Background Workers
+
+For geospatial import processing and asset measurements, start the background workers:
+
+<Accordion title="Geospatial worker">
+  Process shapefile imports and geometry calculations:
+
+  ```bash
+  npm run worker:geo
+  ```
+
+  Or run once for testing:
+  ```bash
+  npm run worker:geo:once
+  ```
+</Accordion>
+
+<Accordion title="Asset measurement worker">
+  Process asset measurement calculation jobs:
+
+  ```bash
+  npm run worker:assets
+  ```
+
+  Or run once for testing:
+  ```bash
+  npm run worker:assets:once
+  ```
+</Accordion>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Database connection refused">
+    Ensure Docker is running and PostgreSQL container is up:
+    ```bash
+    docker compose ps
+    docker compose logs postgres
+    ```
+  </Accordion>
+
+  <Accordion title="Migration errors">
+    Reset the database and rerun migrations:
+    ```bash
+    docker compose down -v
+    docker compose up -d
+    npm run db:migrate
+    npm run db:seed
+    ```
+  </Accordion>
+
+  <Accordion title="Port 3000 already in use">
+    Stop any process using port 3000 or change the port:
+    ```bash
+    # On Linux/Mac
+    lsof -ti:3000 | xargs kill -9
+    
+    # On Windows
+    netstat -ano | findstr :3000
+    taskkill /PID <PID> /F
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## What's Next?
+
+- Read the [Installation guide](/installation) for production deployment
+- Explore [Core Features](/features/authentication) to understand the platform
+- Check the [API Reference](/api/auth/overview) for integration

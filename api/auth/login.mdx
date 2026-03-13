@@ -1,0 +1,207 @@
+---
+title: 'Login'
+description: 'Authenticate users and create sessions'
+api: 'POST /api/auth/login-validation'
+---
+
+## Overview
+
+SMyEG uses a two-step login process:
+
+1. **Login Validation** (`POST /api/auth/login-validation`) - Validates user credentials and organization membership
+2. **NextAuth SignIn** (`POST /api/auth/callback/credentials`) - Handled by NextAuth.js to create the session
+
+This page documents the login validation endpoint. For the actual authentication, use NextAuth's `signIn()` function from the client.
+
+## Login Validation Endpoint
+
+Before attempting authentication, call this endpoint to validate that the user can log in with the selected organization.
+
+### Endpoint
+
+```
+POST /api/auth/login-validation
+```
+
+### Request Body
+
+<ParamField body="identifier" type="string" required>
+  User's email address or username. Case-insensitive.
+</ParamField>
+
+<ParamField body="organizationId" type="string" required>
+  The UUID of the organization the user wants to access.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Indicates if the request was successful
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  <ResponseField name="canAttemptLogin" type="boolean">
+    Whether the user can proceed with login
+  </ResponseField>
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.smyeg.example/api/auth/login-validation \
+  -H "Content-Type: application/json" \
+  -d '{
+    "identifier": "user@example.com",
+    "organizationId": "550e8400-e29b-41d4-a716-446655440000"
+  }'
+```
+
+### Success Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "canAttemptLogin": true
+  }
+}
+```
+
+### Error Responses
+
+#### Invalid Data (400)
+
+```json
+{
+  "success": false,
+  "error": "Datos inválidos"
+}
+```
+
+Returned when `identifier` or `organizationId` are missing or empty.
+
+#### User Not in Organization (409)
+
+```json
+{
+  "success": false,
+  "error": "El usuario no pertenece a la organización seleccionada",
+  "details": {
+    "code": "USER_NOT_IN_ORG"
+  }
+}
+```
+
+Returned when the user exists but doesn't have access to the selected organization.
+
+#### User Not Active (409)
+
+```json
+{
+  "success": false,
+  "error": "El usuario no está activo",
+  "details": {
+    "code": "USER_NOT_ACTIVE"
+  }
+}
+```
+
+Returned when the user's account status is not `ACTIVE` (e.g., `PENDING_VERIFICATION`, `SUSPENDED`).
+
+## NextAuth Login Flow
+
+After successful validation, use NextAuth to complete the login:
+
+### Client-Side (React)
+
+```typescript
+import { signIn } from "next-auth/react";
+
+const result = await signIn("credentials", {
+  identifier: "user@example.com",
+  password: "SecurePass123",
+  organizationId: "550e8400-e29b-41d4-a716-446655440000",
+  redirect: false,
+});
+
+if (result?.error) {
+  console.error("Login failed");
+} else {
+  console.log("Login successful");
+}
+```
+
+### Server-Side
+
+```typescript
+import { signIn } from "@/lib/auth";
+
+const result = await signIn("credentials", {
+  identifier: "user@example.com",
+  password: "SecurePass123",
+  organizationId: "550e8400-e29b-41d4-a716-446655440000",
+});
+```
+
+## Authentication Logic
+
+The NextAuth credentials provider performs the following checks:
+
+1. **User Lookup** - Finds user by email or username (case-insensitive)
+2. **Account Status** - Verifies user status is `ACTIVE`
+3. **Account Lock** - Checks if account is locked due to failed attempts
+4. **Password Verification** - Verifies password hash
+5. **Organization Access** - Confirms user has access to selected organization
+6. **Failed Attempts Tracking** - Updates failed login counter (locks after 5 failed attempts for 30 minutes)
+7. **Audit Logging** - Records login attempt (success or failure)
+
+### Session Data
+
+Successful authentication creates a JWT session with:
+
+```typescript
+{
+  user: {
+    id: string,
+    email: string,
+    name: string,
+    roles: string[],
+    permissions: string[],
+    organizationId: string,
+    organizationName: string
+  }
+}
+```
+
+## Security Features
+
+### Account Locking
+
+- After 5 failed login attempts, the account is locked for 30 minutes
+- Lock is automatically released after the time period
+- Lock can be cleared by resetting the password
+
+### Audit Trail
+
+All login attempts are logged to the audit log with:
+- `action`: "LOGIN" (success) or "LOGIN_FAILED"
+- `entityType`: "User"
+- `entityId`: User ID
+- Timestamp
+
+### Password Security
+
+- Passwords are hashed using bcrypt
+- Password verification uses constant-time comparison
+- Failed verification increments attempt counter before returning
+
+## Related Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Register" icon="user-plus" href="/api/auth/register">
+    Create a new user account
+  </Card>
+  <Card title="Password Reset" icon="key" href="/api/auth/password-reset">
+    Reset a forgotten password
+  </Card>
+</CardGroup>

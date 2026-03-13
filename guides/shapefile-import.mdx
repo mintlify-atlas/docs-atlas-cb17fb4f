@@ -1,0 +1,377 @@
+---
+title: Shapefile Import
+description: How to import shapefiles for Level 4 patrimony units (rodales)
+icon: map
+---
+
+## Overview
+
+SMyEG supports importing geospatial data for Level 4 patrimony units (rodales) via shapefile upload. The system validates the geometry, links it to the patrimony hierarchy, and automatically calculates areas and centroids.
+
+<Info>
+  The geo import process is asynchronous. After upload, a background worker processes the file and reports results.
+</Info>
+
+## Shapefile Requirements
+
+### Required Files in ZIP Archive
+
+Your ZIP file **must** contain these four files:
+
+| File Extension | Required | Purpose |
+|----------------|----------|----------|
+| `.shp` | Yes | Shape format - main geometry data |
+| `.shx` | Yes | Shape index - positional index |
+| `.dbf` | Yes | Attribute format - attribute data table |
+| `.prj` | Yes | Projection format - coordinate system |
+
+<Warning>
+  Uploads missing any of these four files will be rejected immediately.
+</Warning>
+
+### Geometry Requirements
+
+| Requirement | Value |
+|-------------|-------|
+| **Geometry Type** | Polygon or MultiPolygon |
+| **Coordinate System** | Any valid CRS transformable to EPSG:4326 (WGS84) |
+| **Validity** | Geometries must be valid (no self-intersections, invalid rings, etc.) |
+| **Empty Geometries** | Not allowed |
+
+## Required Attributes
+
+The shapefile's `.dbf` must contain these attribute fields for hierarchical linking:
+
+### Hierarchical Identifiers (Mandatory)
+
+<ResponseField name="nivel2_id" type="string" required>
+  Identifier for Level 2 patrimony unit (e.g., FINCA, PREDIO)
+  
+  **Alternate field names**: `nivel2`, `nivel_2`, `cod_n2`, `codfinca`, `finca`, `n2`
+</ResponseField>
+
+<ResponseField name="nivel3_id" type="string" required>
+  Identifier for Level 3 patrimony unit (e.g., LOTE, COMPARTIMIENTO)
+  
+  **Alternate field names**: `nivel3`, `nivel_3`, `cod_n3`, `codlote`, `lote`, `n3`
+</ResponseField>
+
+<ResponseField name="nivel4_id" type="string" required>
+  Identifier for Level 4 patrimony unit (RODAL)
+  
+  **Alternate field names**: `nivel4`, `nivel_4`, `cod_n4`, `codrodal`, `rodal`, `n4`
+</ResponseField>
+
+<Info>
+  The system is **case-insensitive** and checks multiple common field name variations. You can use any of the alternate names listed above.
+</Info>
+
+### Linking Key
+
+Records are matched using the combination:
+```
+nivel2_id + nivel3_id + nivel4_id
+```
+
+This combination **must** match an existing patrimony hierarchy in your organization.
+
+## Optional Attributes
+
+These fields are recommended but not required:
+
+<ResponseField name="currentLandUseName" type="string">
+  Current land use classification (e.g., "BOSQUE", "PLANTACION")
+  
+  **Alternate field names**: `usoactual`, `uso_actual`, `uso`, `landuse`, `land_use`
+  
+  Must match an entry in the Land Use Types catalog for your organization.
+</ResponseField>
+
+<ResponseField name="previousLandUseName" type="string">
+  Previous land use (for tracking land use changes)
+  
+  **Alternate field names**: `usoanterior`, `uso_anterior`, `previoususe`, `oldlanduse`
+</ResponseField>
+
+<ResponseField name="variationDate" type="date">
+  Date of land use change (format: YYYY-MM-DD)
+  
+  **Alternate field names**: `fechavariacion`, `fecha_variacion`, `landusechangedate`, `fecha_cambio_uso`
+</ResponseField>
+
+<ResponseField name="variationNotes" type="string">
+  Notes about the land use change
+  
+  **Alternate field names**: `observaciones`, `observacion`, `nota`, `notas`, `comentario`
+</ResponseField>
+
+## Import Process
+
+<Steps>
+  <Step title="Prepare Your Shapefile">
+    1. Ensure your shapefile contains all required files (.shp, .shx, .dbf, .prj)
+    2. Verify attribute field names match required identifiers
+    3. Check that Level 2/3/4 codes exist in your organization's patrimony hierarchy
+    4. Validate geometries are Polygon or MultiPolygon type
+    5. Compress all files into a single `.zip` archive
+  </Step>
+  
+  <Step title="Navigate to Geo Import">
+    Go to **Forest Patrimony** → **Geometry** → **Import Shapefile**.
+  </Step>
+  
+  <Step title="Upload ZIP File">
+    1. Click **Upload Shapefile**
+    2. Select your `.zip` file
+    3. Optionally set default variation date and notes (applied if not in shapefile)
+    4. Click **Import**
+  </Step>
+  
+  <Step title="Monitor Job Status">
+    The system creates an import job with status `PENDING`. Track progress:
+    - `EXTRACTING` - Unzipping and reading files
+    - `VALIDATING` - Checking geometry and attributes
+    - `PROCESSING` - Importing features and updating database
+    - `COMPLETED` - Import finished successfully
+    - `FAILED` - Import encountered errors
+  </Step>
+  
+  <Step title="Review Results">
+    After completion, view:
+    - Total records in shapefile
+    - Successfully processed records
+    - Failed records with error messages
+    - Individual feature processing details
+  </Step>
+</Steps>
+
+## What Happens During Import
+
+### 1. File Validation
+
+- ZIP archive is extracted
+- Required files (.shp, .shx, .dbf, .prj) are verified
+- Shapefile is parsed into GeoJSON features
+
+### 2. Feature Processing
+
+For each feature:
+
+1. **Extract identifiers** from attributes (nivel2_id, nivel3_id, nivel4_id)
+2. **Validate geometry** type (must be Polygon or MultiPolygon)
+3. **Match hierarchy** - verify Level 2/3/4 combination exists in your organization
+4. **Transform CRS** - convert to EPSG:4326 (WGS84)
+5. **Validate land use** - if provided, check against Land Use Types catalog
+
+### 3. Database Updates
+
+For each successfully validated feature:
+
+1. **Archive old geometry** - set `isActive: false` on previous geometry version
+2. **Insert new geometry** - create new `forest_geometry_n4` record
+3. **Calculate metrics** - compute area (ha) and centroid automatically
+4. **Update Level 4 unit** - update `totalAreaHa`, `centroidLatitude`, `centroidLongitude`
+5. **Update land use** - if provided, update `currentLandUseName`
+6. **Create variation record** - if land use changed, create `LandPatrimonialVariation` entry
+7. **Sync totals** - recalculate land use type surface totals for the organization
+
+<Info>
+  Geometries are versioned. Old versions are preserved with `validTo` timestamp for audit purposes.
+</Info>
+
+## Validation Rules
+
+### Hierarchy Validation
+
+```typescript
+// The system checks:
+1. nivel2_id exists in ForestPatrimonyLevel2
+2. nivel3_id exists under the matched nivel2
+3. nivel4_id exists under the matched nivel3
+4. All units belong to YOUR organization
+```
+
+**Error if not found**:
+```
+"No existe relación jerárquica válida para Nivel 2/3/4 en la organización."
+```
+
+### Geometry Validation
+
+```typescript
+// Accepted types:
+- Polygon (converted to MultiPolygon)
+- MultiPolygon
+
+// Rejected types:
+- Point, LineString, GeometryCollection, etc.
+```
+
+**Error for invalid type**:
+```
+"Solo se permiten geometrías Polygon o MultiPolygon."
+```
+
+### Land Use Validation
+
+If `currentLandUseName` or `previousLandUseName` is provided:
+
+1. System searches for matching `LandUseType` (case-insensitive)
+2. Must be in your organization's catalog
+3. Must be marked as `isActive: true`
+
+**Error if not found**:
+```
+"El uso actual no existe en la tabla auxiliar de Uso de Suelos"
+```
+
+## Land Use Change Tracking
+
+When a shapefile includes land use information, the system automatically:
+
+### Creates Patrimonial Variation Records
+
+```typescript
+if (currentLandUseName !== previousLandUseName) {
+  // Creates LandPatrimonialVariation with:
+  - previousLandUseName
+  - newLandUseName
+  - affectedAreaHa (calculated from geometry)
+  - variationDate (from shapefile or import defaults)
+  - variationNotes (from shapefile or import defaults)
+  - kind: "INCREMENTO" or "SIN_CAMBIO"
+  - status: "PENDIENTE"
+}
+```
+
+### Updates Land Use Totals
+
+After successful import, the system recalculates:
+
+```sql
+-- Aggregates surface by land use name
+SELECT 
+  currentLandUseName,
+  SUM(totalAreaHa) as total_surface_ha
+FROM ForestPatrimonyLevel4
+WHERE organizationId = ?
+GROUP BY currentLandUseName
+
+-- Updates LandUseType.surfaceHa
+```
+
+## Security & Organization Isolation
+
+<Warning>
+  **Critical**: The `organizationId` is **NEVER** taken from the shapefile. It is always resolved from the authenticated user.
+</Warning>
+
+- Users can only import shapefiles for patrimony units in their own organization
+- Hierarchy validation checks `organizationId` at Level 2
+- Cross-organization imports are automatically rejected
+- SUPER_ADMIN users are not exempt from this restriction
+
+## Common Errors and Solutions
+
+<Accordion title="ZIP incompleto. Faltan archivos obligatorios: .prj">
+  **Cause**: Your ZIP file is missing the `.prj` (projection) file.
+  
+  **Solution**: Ensure all four required files (.shp, .shx, .dbf, .prj) are included in the ZIP.
+</Accordion>
+
+<Accordion title="No se encontraron códigos de jerarquía Nivel2/Nivel3/Nivel4 en las propiedades">
+  **Cause**: The shapefile attributes don't include required identifier fields.
+  
+  **Solution**: 
+  - Check your `.dbf` file includes fields like `nivel2_id`, `nivel3_id`, `nivel4_id`
+  - Or use alternate field names: `nivel2`, `nivel3`, `nivel4`
+  - Field names are case-insensitive
+</Accordion>
+
+<Accordion title="No existe relación jerárquica válida para Nivel 2/3/4 en la organización">
+  **Cause**: The nivel2_id + nivel3_id + nivel4_id combination doesn't exist in your organization.
+  
+  **Solution**:
+  - Verify the codes in your shapefile match existing patrimony units
+  - Check that the hierarchy belongs to your organization
+  - Create the Level 2/3/4 units first if they don't exist
+</Accordion>
+
+<Accordion title="Solo se permiten geometrías Polygon o MultiPolygon">
+  **Cause**: The shapefile contains Point, Line, or other non-polygon geometries.
+  
+  **Solution**: 
+  - Use GIS software to filter/export only polygon features
+  - Remove point and line geometries from the shapefile
+</Accordion>
+
+<Accordion title="El uso actual no existe en la tabla auxiliar de Uso de Suelos">
+  **Cause**: The `currentLandUseName` value doesn't match any active Land Use Type.
+  
+  **Solution**:
+  - Go to **Configuration** → **Land Use Types**
+  - Add the missing land use type to your organization's catalog
+  - Or correct the value in the shapefile to match existing types (case-insensitive)
+</Accordion>
+
+## Download Template
+
+Download a sample shapefile template:
+
+```bash
+GET /api/forest/geo/import?format=csv
+```
+
+Returns a CSV with example attribute structure:
+
+```csv
+nivel2,nivel3,nivel4,usoactual,usoanterior,fechavariacion,observaciones
+N2-001,N3-001,N4-001,BOSQUE,NO BOSQUE,2026-03-13,Cambio por actualización masiva GIS
+```
+
+## Worker Configuration
+
+The geo import worker processes jobs asynchronously. Configure via environment variables:
+
+```bash
+# Worker polling interval (milliseconds)
+GEO_WORKER_INTERVAL_MS=4000
+
+# Max import jobs per cycle
+GEO_IMPORT_BATCH_SIZE=5
+
+# Max recalculation jobs per cycle
+GEO_RECALC_BATCH_SIZE=10
+
+# Run once and exit (for testing)
+GEO_WORKER_RUN_ONCE=true
+```
+
+Start the worker:
+
+```bash
+# Continuous mode
+pnpm worker:geo
+
+# Single cycle (testing)
+pnpm worker:geo:once
+```
+
+## Permissions Required
+
+| Action | Required Permission |
+|--------|--------------------|
+| Upload shapefile | `forest-patrimony:CREATE` or `forest-patrimony:UPDATE` |
+| View import jobs | `forest-patrimony:READ` |
+| Download template | `forest-patrimony:READ` |
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="Land Accounting" icon="chart-line" href="/guides/land-accounting">
+    Track patrimonial variations from land use changes
+  </Card>
+  <Card title="Forest Patrimony" icon="tree" href="/features/forest-patrimony">
+    Understanding the patrimony hierarchy
+  </Card>
+</CardGroup>

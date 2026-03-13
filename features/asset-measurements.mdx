@@ -1,0 +1,602 @@
+---
+title: Asset Measurements
+description: Biological asset measurement tracking with flexible campaign management, observation collection, and calculation job processing
+icon: ruler
+---
+
+## Overview
+
+SMyEG provides a comprehensive **asset measurement system** for tracking biological, hydrological, dendrometric, and demographic data through structured measurement campaigns. The system supports multiple measurement protocols, flexible data schemas, and automated calculation pipelines.
+
+## Measurement Domains
+
+<CardGroup cols={2}>
+  <Card title="Biological" icon="seedling">
+    Survival rates, pre-operative, pre-harvest, and continuous monitoring
+  </Card>
+  <Card title="Hydrological" icon="droplet">
+    Meteorological and hydrological station measurements
+  </Card>
+  <Card title="Dendrometric" icon="ruler-vertical">
+    Tree measurements, multi-purpose plots, carbon inventory
+  </Card>
+  <Card title="Demographic" icon="users">
+    Community surveys and family unit assessments
+  </Card>
+</CardGroup>
+
+```prisma
+enum AssetDomain {
+  BIOLOGICO
+  HIDROLOGICO
+  DENDROMETRICO
+  DEMOGRAFICO
+}
+```
+
+## Measurement Protocols
+
+### Protocol Types
+
+```prisma
+enum MeasurementProtocolType {
+  // Biological protocols
+  BIO_SOBREVIVENCIA
+  BIO_PREOPERATIVO
+  BIO_PRECOSECHA
+  BIO_CONTINUO
+  BIO_PARCELAS_PERMANENTES
+  
+  // Hydrological protocols
+  HIDRO_ESTACION_METEOROLOGICA
+  HIDRO_ESTACION_HIDROLOGICA
+  
+  // Dendrometric protocols
+  DENDRO_PARCELA_MULTIPROPOSITO
+  DENDRO_PARCELA_CARBONO
+  
+  // Demographic protocols
+  DEMO_ENCUESTA_COMUNIDAD
+  DEMO_ENCUESTA_NUCLEO_FAMILIAR
+}
+```
+
+<Info>
+  Each protocol type has its own data schema and calculation rules, allowing flexibility for different measurement methodologies.
+</Info>
+
+## Measurement Campaigns
+
+### Campaign Model
+
+```prisma
+model AssetMeasurementCampaign {
+  id                String                  @id @default(uuid())
+  organizationId    String
+  level4Id          String                  // Patrimony unit
+  domain            AssetDomain
+  protocolType      MeasurementProtocolType
+  campaignCode      String                  // Unique identifier
+  campaignName      String
+  campaignDate      DateTime
+  schemaVersion     String                  @default("1.0")
+  status            AssetCampaignStatus     @default(DRAFT)
+  notes             String?
+  metadata          Json?                   // Custom configuration
+  createdById       String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  
+  organization      Organization
+  level4            ForestPatrimonyLevel4
+  createdBy         User?
+  observations      AssetMeasurementObservation[]
+  results           AssetResultSnapshot[]
+  calculationJobs   AssetCalculationJob[]
+  
+  @@unique([organizationId, campaignCode])
+  @@map("asset_measurement_campaigns")
+}
+
+enum AssetCampaignStatus {
+  DRAFT       // Being configured
+  ACTIVE      // Collecting observations
+  CLOSED      // No more data entry
+  CANCELLED   // Cancelled
+}
+```
+
+### Campaign Workflow
+
+<Steps>
+  <Step title="Create Campaign">
+    Define domain, protocol, and associated Level 4 patrimony unit
+  </Step>
+  <Step title="Collect Observations">
+    Field teams record measurements linked to the campaign
+  </Step>
+  <Step title="Process Calculations">
+    Automated jobs calculate metrics and generate result snapshots
+  </Step>
+  <Step title="Review Results">
+    Analyze calculated metrics and close campaign
+  </Step>
+</Steps>
+
+## Observation Collection
+
+### Observation Model
+
+```prisma
+model AssetMeasurementObservation {
+  id                String                  @id @default(uuid())
+  campaignId        String
+  level5UnitCode    String?                 // Plot identifier
+  sectionKey        String?                 // Data grouping key
+  observedAt        DateTime?
+  payload           Json                    // Flexible schema
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  
+  campaign          AssetMeasurementCampaign
+  
+  @@index([campaignId, observedAt])
+  @@index([campaignId, level5UnitCode])
+  @@map("asset_measurement_observations")
+}
+```
+
+### Flexible Payload Schema
+
+Observations use a **JSON payload** to accommodate different measurement protocols:
+
+<Tabs>
+  <Tab title="Biological Survival">
+    ```json
+    {
+      "level5UnitCode": "PLOT-001",
+      "observedAt": "2024-01-15T10:30:00Z",
+      "payload": {
+        "totalPlanted": 250,
+        "surviving": 237,
+        "dead": 13,
+        "survivalRate": 94.8,
+        "mainCauseOfMortality": "Drought",
+        "observerName": "Juan Pérez"
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Dendrometric Measurement">
+    ```json
+    {
+      "level5UnitCode": "PLOT-002",
+      "observedAt": "2024-01-15T14:00:00Z",
+      "payload": {
+        "trees": [
+          {
+            "treeId": "T001",
+            "dbh": 32.5,
+            "height": 18.2,
+            "species": "Pinus caribaea",
+            "health": "Good"
+          },
+          {
+            "treeId": "T002",
+            "dbh": 28.1,
+            "height": 16.8,
+            "species": "Pinus caribaea",
+            "health": "Fair"
+          }
+        ],
+        "plotArea": 400,
+        "measurementTeam": "Field Team A"
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Meteorological Station">
+    ```json
+    {
+      "sectionKey": "STATION-METEO-01",
+      "observedAt": "2024-01-15T12:00:00Z",
+      "payload": {
+        "temperature": 28.5,
+        "humidity": 68,
+        "precipitation": 12.3,
+        "windSpeed": 15.2,
+        "windDirection": "NE",
+        "pressure": 1013.2,
+        "solarRadiation": 850
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Bulk Import Observations
+
+```typescript
+// POST /api/assets/measurement-observations/import
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const parsed = importMeasurementObservationsSchema.safeParse(body);
+  
+  if (!parsed.success) {
+    return fail("Datos inválidos", 400, parsed.error.flatten());
+  }
+  
+  const campaign = await prisma.assetMeasurementCampaign.findFirst({
+    where: {
+      id: parsed.data.campaignId,
+      organizationId,
+    },
+  });
+  
+  if (!campaign) {
+    return fail("Campaña no encontrada", 404);
+  }
+  
+  // Bulk insert observations
+  const created = await prisma.assetMeasurementObservation.createMany({
+    data: parsed.data.observations.map(obs => ({
+      campaignId: parsed.data.campaignId,
+      level5UnitCode: obs.level5UnitCode,
+      sectionKey: obs.sectionKey,
+      observedAt: obs.observedAt,
+      payload: obs.payload as Prisma.InputJsonValue,
+    })),
+  });
+  
+  return ok({ count: created.count }, 201);
+}
+```
+
+## Result Snapshots
+
+### Result Model
+
+```prisma
+model AssetResultSnapshot {
+  id                String                  @id @default(uuid())
+  campaignId        String
+  level4Id          String
+  domain            AssetDomain
+  resultKey         String                  // e.g., "survival_summary"
+  resultVersion     Int                     @default(1)
+  schemaVersion     String                  @default("1.0")
+  resultPayload     Json                    // Calculated metrics
+  isCurrent         Boolean                 @default(true)
+  calculatedAt      DateTime                @default(now())
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  
+  campaign          AssetMeasurementCampaign
+  level4            ForestPatrimonyLevel4
+  
+  @@unique([campaignId, resultKey, resultVersion])
+  @@index([level4Id, domain, isCurrent, calculatedAt])
+  @@map("asset_result_snapshots")
+}
+```
+
+### Result Versioning
+
+Results are versioned to track recalculations:
+
+- **resultVersion**: Increments with each recalculation
+- **isCurrent**: Only the latest version has `isCurrent = true`
+- **calculatedAt**: Timestamp of calculation
+
+**Example result payload:**
+
+```json
+{
+  "resultKey": "survival_summary",
+  "resultVersion": 2,
+  "resultPayload": {
+    "totalPlots": 25,
+    "totalPlanted": 6250,
+    "totalSurviving": 5912,
+    "totalDead": 338,
+    "overallSurvivalRate": 94.6,
+    "survivalRateByPlot": [
+      { "plotCode": "PLOT-001", "rate": 94.8 },
+      { "plotCode": "PLOT-002", "rate": 93.2 }
+    ],
+    "mortalityCauses": {
+      "Drought": 198,
+      "Disease": 85,
+      "Pest": 55
+    }
+  },
+  "calculatedAt": "2024-01-15T16:30:00Z"
+}
+```
+
+### Querying Results
+
+```typescript
+// Get current results for a campaign
+const results = await prisma.assetResultSnapshot.findMany({
+  where: {
+    campaignId: "campaign-id",
+    isCurrent: true,
+  },
+  orderBy: { resultKey: "asc" },
+});
+
+// Get historical results
+const history = await prisma.assetResultSnapshot.findMany({
+  where: {
+    campaignId: "campaign-id",
+    resultKey: "survival_summary",
+  },
+  orderBy: { resultVersion: "desc" },
+});
+```
+
+## Calculation Jobs
+
+### Job Model
+
+```prisma
+model AssetCalculationJob {
+  id                String                  @id @default(uuid())
+  organizationId    String
+  campaignId        String
+  domain            AssetDomain
+  protocolType      MeasurementProtocolType
+  status            AssetCalculationStatus  @default(PENDING)
+  attempts          Int                     @default(0)
+  runAfter          DateTime                @default(now())
+  startedAt         DateTime?
+  completedAt       DateTime?
+  errorMessage      String?
+  payload           Json?                   // Calculation parameters
+  createdById       String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  
+  organization      Organization
+  campaign          AssetMeasurementCampaign
+  createdBy         User?
+  
+  @@map("asset_calculation_jobs")
+}
+
+enum AssetCalculationStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+```
+
+### Job Queue Processing
+
+```typescript
+// Worker endpoint: POST /api/assets/calculation-jobs/worker
+export async function POST(req: NextRequest) {
+  // Fetch pending jobs
+  const jobs = await prisma.assetCalculationJob.findMany({
+    where: {
+      status: "PENDING",
+      runAfter: { lte: new Date() },
+      attempts: { lt: 3 },
+    },
+    orderBy: { createdAt: "asc" },
+    take: 10,
+  });
+  
+  for (const job of jobs) {
+    try {
+      // Mark as processing
+      await prisma.assetCalculationJob.update({
+        where: { id: job.id },
+        data: {
+          status: "PROCESSING",
+          startedAt: new Date(),
+          attempts: { increment: 1 },
+        },
+      });
+      
+      // Fetch observations
+      const observations = await prisma.assetMeasurementObservation.findMany({
+        where: { campaignId: job.campaignId },
+      });
+      
+      // Run calculation based on protocol
+      const results = await calculateMetrics(
+        job.protocolType,
+        observations
+      );
+      
+      // Save results
+      await prisma.assetResultSnapshot.create({
+        data: {
+          campaignId: job.campaignId,
+          level4Id: campaign.level4Id,
+          domain: job.domain,
+          resultKey: results.key,
+          resultPayload: results.payload,
+          isCurrent: true,
+        },
+      });
+      
+      // Mark job as completed
+      await prisma.assetCalculationJob.update({
+        where: { id: job.id },
+        data: {
+          status: "COMPLETED",
+          completedAt: new Date(),
+        },
+      });
+    } catch (error) {
+      // Handle failure
+      await prisma.assetCalculationJob.update({
+        where: { id: job.id },
+        data: {
+          status: job.attempts >= 2 ? "FAILED" : "PENDING",
+          errorMessage: error.message,
+          runAfter: new Date(Date.now() + 5 * 60 * 1000), // Retry in 5 min
+        },
+      });
+    }
+  }
+  
+  return ok({ processedJobs: jobs.length });
+}
+```
+
+### Triggering Calculations
+
+```typescript
+// Enqueue calculation job after importing observations
+const job = await prisma.assetCalculationJob.create({
+  data: {
+    organizationId,
+    campaignId,
+    domain: campaign.domain,
+    protocolType: campaign.protocolType,
+    status: "PENDING",
+    createdById: authResult.session.user.id,
+  },
+});
+```
+
+## API Endpoints
+
+### Campaign Management
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/assets/measurement-campaigns` | GET | List campaigns with filters |
+| `/api/assets/measurement-campaigns` | POST | Create new campaign |
+| `/api/assets/measurement-campaigns` | PATCH | Update campaign |
+| `/api/assets/measurement-campaigns` | DELETE | Delete campaign (if no data) |
+
+**Query parameters:**
+- `level4Id` - Filter by patrimony unit
+- `domain` - Filter by measurement domain
+- `protocolType` - Filter by protocol
+- `status` - Filter by campaign status
+- `search` - Search by code or name
+- `page`, `limit` - Pagination
+- `sortBy`, `sortOrder` - Sorting
+
+### Observation Management
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/assets/measurement-observations` | GET | List observations for campaign |
+| `/api/assets/measurement-observations` | POST | Create single observation |
+| `/api/assets/measurement-observations/import` | POST | Bulk import observations |
+| `/api/assets/measurement-observations/export` | GET | Export observations (CSV/JSON) |
+
+### Results & Calculations
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/assets/result-snapshots` | GET | Query result snapshots |
+| `/api/assets/calculation-jobs` | POST | Manually trigger calculation |
+| `/api/assets/calculation-jobs/worker` | POST | Worker endpoint (cron) |
+
+## Usage Examples
+
+### Create a Biological Survival Campaign
+
+```typescript
+// POST /api/assets/measurement-campaigns
+const campaign = await fetch('/api/assets/measurement-campaigns', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    level4Id: 'abc-123',
+    domain: 'BIOLOGICO',
+    protocolType: 'BIO_SOBREVIVENCIA',
+    campaignCode: 'SURV-2024-Q1',
+    campaignName: 'Survival Assessment Q1 2024',
+    campaignDate: '2024-01-15',
+    status: 'ACTIVE',
+  }),
+});
+```
+
+### Import Observations
+
+```typescript
+// POST /api/assets/measurement-observations/import
+const importResult = await fetch('/api/assets/measurement-observations/import', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    campaignId: 'campaign-id',
+    observations: [
+      {
+        level5UnitCode: 'PLOT-001',
+        observedAt: '2024-01-15T10:00:00Z',
+        payload: {
+          totalPlanted: 250,
+          surviving: 237,
+          dead: 13,
+          survivalRate: 94.8,
+        },
+      },
+      {
+        level5UnitCode: 'PLOT-002',
+        observedAt: '2024-01-15T11:00:00Z',
+        payload: {
+          totalPlanted: 250,
+          surviving: 233,
+          dead: 17,
+          survivalRate: 93.2,
+        },
+      },
+    ],
+  }),
+});
+```
+
+### Query Results
+
+```typescript
+// GET /api/assets/result-snapshots?campaignId=campaign-id&isCurrent=true
+const response = await fetch(
+  '/api/assets/result-snapshots?campaignId=campaign-id&isCurrent=true'
+);
+const { items } = await response.json();
+
+for (const result of items) {
+  console.log(`${result.resultKey}: v${result.resultVersion}`);
+  console.log(result.resultPayload);
+}
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Flexible Schemas" icon="code">
+    Use JSON payloads to accommodate different measurement protocols
+  </Card>
+  <Card title="Version Results" icon="code-branch">
+    Always increment `resultVersion` and set `isCurrent` for latest
+  </Card>
+  <Card title="Async Calculations" icon="clock">
+    Process calculations in background jobs to avoid timeouts
+  </Card>
+  <Card title="Validate Data" icon="check">
+    Validate observation payloads against protocol schemas before import
+  </Card>
+</CardGroup>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Forest Patrimony" icon="tree" href="/features/forest-patrimony">
+    Level 4 units and measurement plots
+  </Card>
+  <Card title="Analytics" icon="chart-line" href="/features/analytics">
+    Dashboard metrics and reporting
+  </Card>
+</CardGroup>

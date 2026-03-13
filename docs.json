@@ -1,122 +1,147 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "SMyEG",
+  "theme": "palm",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#22c55e",
+    "light": "#86efac",
+    "dark": "#16a34a"
   },
   "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/drosales10/SMyEG"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/drosales10/SMyEG"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Getting Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "installation"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Features",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "features/authentication",
+              "features/organizations",
+              "features/forest-patrimony",
+              "features/geospatial-data",
+              "features/asset-measurements",
+              "features/analytics"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "User Guides",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "guides/user-management",
+              "guides/roles-permissions",
+              "guides/shapefile-import",
+              "guides/measurement-campaigns",
+              "guides/land-accounting"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Configuration",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "configuration/environment-variables",
+              "configuration/database-setup",
+              "configuration/workers"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Authentication",
             "pages": [
-              "api-reference/introduction"
+              "api/auth/overview",
+              "api/auth/login",
+              "api/auth/register",
+              "api/auth/password-reset"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Users & Organizations",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/users/overview",
+              "api/organizations/overview",
+              "api/roles/overview"
+            ]
+          },
+          {
+            "group": "Forest Patrimony",
+            "pages": [
+              "api/forest/level2",
+              "api/forest/level3",
+              "api/forest/level4"
+            ]
+          },
+          {
+            "group": "Asset Measurements",
+            "pages": [
+              "api/assets/campaigns",
+              "api/assets/observations",
+              "api/assets/calculations"
+            ]
+          },
+          {
+            "group": "Geospatial",
+            "pages": [
+              "api/geo/import-jobs",
+              "api/geo/recalculation"
+            ]
+          },
+          {
+            "group": "System",
+            "pages": [
+              "api/audit/logs",
+              "api/config/settings"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Deployment",
+        "groups": [
+          {
+            "group": "Setup",
+            "pages": [
+              "deployment/overview",
+              "deployment/docker",
+              "deployment/pm2"
+            ]
+          },
+          {
+            "group": "Background Workers",
+            "pages": [
+              "deployment/workers/geo-worker",
+              "deployment/workers/asset-worker"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "deployment/monitoring",
+              "deployment/troubleshooting"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

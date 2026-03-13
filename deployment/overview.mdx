@@ -1,0 +1,144 @@
+---
+title: Deployment Overview
+description: Architecture and deployment options for the SMyEG geospatial monitoring system
+---
+
+## Architecture
+
+SMyEG is a full-stack geospatial monitoring and evaluation system built with:
+
+- **Frontend & API**: Next.js (App Router) with React 19
+- **Database**: PostgreSQL 15 with PostGIS extensions
+- **Cache**: Redis 7 for session management
+- **Authentication**: NextAuth v5 with credentials
+- **ORM**: Prisma with spatial data support
+- **Workers**: Background job processors for geospatial operations
+
+## Deployment Options
+
+The system can be deployed in multiple ways:
+
+<CardGroup cols={2}>
+  <Card title="Docker Compose" icon="docker" href="/deployment/docker">
+    Recommended for development and containerized production environments
+  </Card>
+  <Card title="PM2 on Windows" icon="windows" href="/deployment/pm2">
+    Native Windows deployment with process management
+  </Card>
+</CardGroup>
+
+## Core Components
+
+### Web Application
+
+The Next.js application serves both the frontend UI and API routes. It handles:
+
+- User authentication and authorization
+- Multi-organization data isolation
+- Dashboard and analytics
+- Geospatial data visualization
+- File uploads (shapefile imports)
+
+**Default Port**: `3000`
+
+### PostgreSQL Database
+
+The database stores:
+
+- User accounts and organizations
+- Hierarchical geospatial entities (Nivel 2, 3, 4)
+- Geometry data with PostGIS
+- Audit logs (partitioned by month)
+- Background job queues
+
+**Default Port**: `5432`
+
+### Redis Cache
+
+Redis provides:
+
+- Session storage for NextAuth
+- Caching layer for frequent queries
+- Real-time data updates
+
+**Default Port**: `6379`
+
+### Background Workers
+
+Two dedicated worker processes handle asynchronous operations:
+
+<CardGroup cols={2}>
+  <Card title="Geo Worker" icon="map" href="/deployment/workers/geo-worker">
+    Processes shapefile imports, geometry recalculations, and variation analysis
+  </Card>
+  <Card title="Asset Worker" icon="chart-line" href="/deployment/workers/asset-worker">
+    Calculates asset measurements and aggregates metrics
+  </Card>
+</CardGroup>
+
+## Infrastructure Requirements
+
+### Minimum Specifications
+
+- **CPU**: 2 cores
+- **RAM**: 4 GB (8 GB recommended for production)
+- **Storage**: 20 GB (depends on geospatial data volume)
+- **Node.js**: v20 or higher
+- **PostgreSQL**: 15 with PostGIS extension
+- **Redis**: 7 or higher
+
+### Network Requirements
+
+- Port 3000: Web application (can be proxied via nginx/Apache)
+- Port 5432: PostgreSQL (internal only, do not expose publicly)
+- Port 6379: Redis (internal only, do not expose publicly)
+
+## Security Considerations
+
+<Warning>
+  Never expose PostgreSQL or Redis ports to the public internet. Use firewall rules to restrict access to localhost or internal networks only.
+</Warning>
+
+### Multi-Organization Isolation
+
+The system enforces strict data isolation:
+
+- Every user belongs to a single organization
+- All data queries are filtered by `organization_id`
+- Shapefile imports are automatically scoped to the authenticated user's organization
+- Cross-organization access is blocked at the database and API level
+
+### Environment Variables
+
+Sensitive configuration must be stored in `.env` files:
+
+```bash
+DATABASE_URL="postgresql://user:password@localhost:5432/app_db"
+REDIS_URL="redis://localhost:6379"
+AUTH_SECRET="your-secure-random-secret"
+NEXTAUTH_URL="https://yourdomain.com"
+```
+
+<Tip>
+  Generate a secure `AUTH_SECRET` with: `openssl rand -base64 32`
+</Tip>
+
+## Next Steps
+
+<Steps>
+  <Step title="Choose Deployment Method">
+    Select [Docker Compose](/deployment/docker) for containerized deployment or [PM2](/deployment/pm2) for native Windows deployment
+  </Step>
+  
+  <Step title="Configure Workers">
+    Set up the [geo worker](/deployment/workers/geo-worker) and [asset worker](/deployment/workers/asset-worker) for background processing
+  </Step>
+  
+  <Step title="Set Up Monitoring">
+    Configure [monitoring and logging](/deployment/monitoring) to track system health
+  </Step>
+  
+  <Step title="Review Troubleshooting">
+    Familiarize yourself with [common issues](/deployment/troubleshooting) and solutions
+  </Step>
+</Steps>

@@ -1,0 +1,523 @@
+---
+title: Organizations
+description: Multi-tenant organization architecture with role-based access control, hierarchical permissions, and flexible user management
+icon: building
+---
+
+## Overview
+
+SMyEG implements a **multi-tenant architecture** where users can belong to and access multiple organizations. Each organization has its own isolated data, configuration, and permission structure, enabling enterprise-scale forest management across different entities.
+
+## Organization Model
+
+### Prisma Schema
+
+```prisma
+model Organization {
+  id                         String    @id @default(uuid())
+  name                       String
+  slug                       String    @unique
+  description                String?
+  logoUrl                    String?
+  countryId                  String?
+  website                    String?
+  isActive                   Boolean   @default(true)
+  settings                   Json?     // Custom configuration
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+  deletedAt                  DateTime? // Soft delete support
+  
+  country                    Country?
+  roles                      Role[]
+  users                      User[]
+  systemConfigurations       SystemConfiguration[]
+  auditLogs                  AuditLog[]
+  forestPatrimonyLevel2Units ForestPatrimonyLevel2[]
+  assetMeasurementCampaigns  AssetMeasurementCampaign[]
+  // ... other relations
+}
+```
+
+### Key Features
+
+<CardGroup cols={2}>
+  <Card title="Unique Slug" icon="link">
+    URL-friendly identifier for organization access (e.g., `/acme-forests`)
+  </Card>
+  <Card title="Soft Deletes" icon="trash-can">
+    `deletedAt` timestamp allows restoration of deactivated organizations
+  </Card>
+  <Card title="Custom Settings" icon="gear">
+    JSON field for flexible per-organization configuration
+  </Card>
+  <Card title="Country Association" icon="globe">
+    Link organizations to specific countries for regional management
+  </Card>
+</CardGroup>
+
+## Multi-Organization User Access
+
+### Authorization Flow
+
+Users can access multiple organizations through their role assignments:
+
+```typescript
+// From src/lib/auth-organizations.ts
+export async function getAuthorizedOrganizationsForUser(
+  userId: string,
+  fallbackOrganizationId?: string | null
+): Promise<AuthorizedOrganization[]> {
+  // 1. Check if user has SUPER_ADMIN role (access to all orgs)
+  const hasSuperAdminRole = await prisma.userRole.findFirst({
+    where: {
+      userId,
+      isActive: true,
+      role: { isActive: true, slug: "SUPER_ADMIN" },
+    },
+  });
+
+  if (hasSuperAdminRole) {
+    // Return all active organizations
+    return await prisma.organization.findMany({
+      where: { isActive: true, deletedAt: null },
+      orderBy: { name: "asc" },
+    });
+  }
+
+  // 2. Get organizations from user's role assignments
+  const assignments = await prisma.userRole.findMany({
+    where: {
+      userId,
+      isActive: true,
+      role: {
+        isActive: true,
+        organizationId: { not: null },
+        organization: { isActive: true, deletedAt: null },
+      },
+    },
+    select: {
+      role: { select: { organization: true } },
+    },
+  });
+
+  return assignments
+    .map(a => a.role.organization)
+    .filter(Boolean);
+}
+```
+
+<Info>
+  **SUPER_ADMIN** users have cross-organization access and can view/manage data across all organizations in the system.
+</Info>
+
+## Organization Context in Sessions
+
+### JWT Token Structure
+
+When users log in, they select an organization which becomes part of their session:
+
+```typescript
+// From src/lib/auth.ts - authorize callback
+const selectedOrganization = authorizedOrganizations.find(
+  org => org.id === organizationId
+);
+
+if (!selectedOrganization) {
+  return null; // User doesn't have access to this org
+}
+
+return {
+  id: user.id,
+  email: user.email,
+  name: user.displayName,
+  roles: roleInfo.roles,
+  permissions: roleInfo.permissions,
+  organizationId: selectedOrganization.id,
+  organizationName: selectedOrganization.name,
+};
+```
+
+<Warning>
+  Users must select an organization during login. All subsequent API requests are scoped to this organization context.
+</Warning>
+
+## Role-Based Access Control (RBAC)
+
+### Role Model
+
+```prisma
+model Role {
+  id              String    @id @default(uuid())
+  organizationId  String?   // Organization-specific role
+  name            String
+  slug            String
+  description     String?
+  isSystemRole    Boolean   @default(false)
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  organization    Organization?
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+  
+  @@unique([organizationId, slug])
+}
+```
+
+**System Roles vs Organization Roles:**
+
+- **System Roles** (`isSystemRole: true`): Global roles like `SUPER_ADMIN` that work across all organizations
+- **Organization Roles** (`organizationId: set`): Scoped to a specific organization (e.g., "ACME Forest Manager")
+
+### User Role Assignment
+
+```prisma
+model UserRole {
+  id         String    @id @default(uuid())
+  userId     String
+  roleId     String
+  assignedAt DateTime  @default(now())
+  assignedBy String?   // User ID who assigned the role
+  expiresAt  DateTime? // Optional expiration
+  isActive   Boolean   @default(true)
+  
+  user       User
+  role       Role
+  
+  @@unique([userId, roleId])
+}
+```
+
+### Permission Model
+
+```prisma
+enum PermissionAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  EXPORT
+  ADMIN
+}
+
+model Permission {
+  id              String           @id @default(uuid())
+  moduleId        String
+  action          PermissionAction
+  name            String
+  description     String?
+  
+  module          Module
+  rolePermissions RolePermission[]
+  
+  @@unique([moduleId, action])
+}
+
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String
+  permissionId String
+  grantedAt    DateTime   @default(now())
+  grantedBy    String?    // Admin who granted permission
+  
+  role         Role
+  permission   Permission
+  
+  @@unique([roleId, permissionId])
+}
+```
+
+## Permission System (CASL Integration)
+
+### Building Abilities
+
+The system uses **CASL** (isomorphic authorization library) for fine-grained access control:
+
+```typescript
+// From src/lib/ability.ts
+import { AbilityBuilder, PureAbility } from "@casl/ability";
+
+export type AppAction = "manage" | "create" | "read" | "update" | "delete";
+export type AppSubject = string; // Module slug
+export type AppAbility = PureAbility<[AppAction, AppSubject]>;
+
+const actionMap: Record<string, AppAction> = {
+  CREATE: "create",
+  READ: "read",
+  UPDATE: "update",
+  DELETE: "delete",
+  ADMIN: "manage", // Full control
+};
+
+export function buildAbilityFromPermissions(permissions: string[]) {
+  const { can, build } = new AbilityBuilder<AppAbility>(PureAbility);
+
+  for (const entry of permissions) {
+    const [moduleSlug, actionRaw] = entry.split(":");
+    const action = actionMap[actionRaw] ?? "read";
+    if (moduleSlug) {
+      can(action, moduleSlug);
+    }
+  }
+
+  return build();
+}
+```
+
+**Permission Format:** `{module-slug}:{ACTION}`
+
+**Examples:**
+- `forest-patrimony:READ`
+- `forest-patrimony:CREATE`
+- `forest-patrimony:ADMIN`
+- `asset-measurement:UPDATE`
+
+### Checking Permissions in API Routes
+
+```typescript
+// From src/app/api/forest/patrimony/route.ts
+import { hasPermission } from "@/lib/permissions";
+import { requireAuth, requirePermission } from "@/lib/api-helpers";
+
+export async function GET(req: NextRequest) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
+  const isSuperAdmin = authResult.session.user.roles?.includes("SUPER_ADMIN");
+  
+  if (!isSuperAdmin) {
+    const permissions = authResult.session.user.permissions ?? [];
+    const canReadPatrimony = hasPermission(
+      permissions,
+      "forest-patrimony",
+      "READ"
+    );
+    
+    if (!canReadPatrimony) {
+      const permissionError = requirePermission(
+        permissions,
+        "forest-patrimony",
+        "READ"
+      );
+      if (permissionError) return permissionError;
+    }
+  }
+  
+  // Proceed with data access
+}
+```
+
+## Data Isolation & Scoping
+
+### Organization-Scoped Queries
+
+All forest patrimony data is scoped to organizations:
+
+```typescript
+// Level 2 patrimony query with organization scope
+const where: Prisma.ForestPatrimonyLevel2WhereInput = {
+  ...(isOrgScoped ? { organizationId: effectiveOrganizationId } : {}),
+  ...(search ? {
+    OR: [
+      { code: { contains: search, mode: "insensitive" } },
+      { name: { contains: search, mode: "insensitive" } },
+    ],
+  } : {}),
+};
+
+const items = await prisma.forestPatrimonyLevel2.findMany({
+  where,
+  skip: (page - 1) * limit,
+  take: limit,
+  orderBy: [{ createdAt: "desc" }],
+});
+```
+
+### Hierarchical Data Scoping
+
+For nested levels (3, 4, 5), organization scope is inherited:
+
+```typescript
+// Level 4 query scoped through Level 3 → Level 2 → Organization
+const where: Prisma.ForestPatrimonyLevel4WhereInput = {
+  ...(parentId ? { level3Id: parentId } : {}),
+  ...(!isSuperAdmin ? {
+    level3: {
+      level2: {
+        organizationId: effectiveOrganizationId ?? ""
+      }
+    }
+  } : {}),
+};
+```
+
+<Note>
+  Even SUPER_ADMIN users can optionally filter data by organization using the `scopeOrg` or `orgId` query parameters.
+</Note>
+
+## System Configuration
+
+### Per-Organization Settings
+
+```prisma
+model SystemConfiguration {
+  id              String        @id @default(uuid())
+  organizationId  String?       // Org-specific config
+  category        String        // e.g., "general", "branding"
+  key             String        // e.g., "site_title", "logo_url"
+  value           String?
+  configType      ConfigType    @default(STRING)
+  description     String?
+  isPublic        Boolean       @default(false)
+  isEditable      Boolean       @default(true)
+  validationRules Json?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  updatedBy       String?
+  
+  organization    Organization?
+  
+  @@unique([organizationId, category, key])
+}
+
+enum ConfigType {
+  STRING
+  INTEGER
+  BOOLEAN
+  JSON
+  SECRET
+}
+```
+
+**Example configurations:**
+
+```json
+{
+  "organizationId": "org-123",
+  "category": "general",
+  "key": "site_title",
+  "value": "ACME Forests Management",
+  "configType": "STRING",
+  "isPublic": true
+}
+```
+
+```json
+{
+  "organizationId": "org-123",
+  "category": "features",
+  "key": "enable_geospatial",
+  "value": "true",
+  "configType": "BOOLEAN"
+}
+```
+
+## Organization Management API
+
+### Core Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/organizations` | GET | List organizations (scoped by user) |
+| `/api/organizations` | POST | Create new organization (admin only) |
+| `/api/organizations/[id]` | GET | Get organization details |
+| `/api/organizations/[id]` | PATCH | Update organization |
+| `/api/organizations/[id]` | DELETE | Soft delete organization |
+| `/api/organizations/[id]/restore` | POST | Restore soft-deleted org |
+| `/api/organizations/[id]/branding` | POST | Update org branding/logo |
+| `/api/organizations/public` | GET | Public organization info |
+
+### Organization Selection at Login
+
+```typescript
+// GET /api/auth/organization-options
+export async function getAuthorizedOrganizationCards(
+  userId: string,
+  fallbackOrganizationId?: string | null
+): Promise<AuthorizedOrganizationCard[]> {
+  const authorizedOrganizations = await getAuthorizedOrganizationsForUser(
+    userId,
+    fallbackOrganizationId
+  );
+  
+  // Enrich with branding info
+  const organizations = await prisma.organization.findMany({
+    where: { id: { in: authorizedOrganizations.map(o => o.id) } },
+    select: { id: true, name: true, logoUrl: true },
+  });
+  
+  // Fetch site_title from SystemConfiguration
+  const siteTitleConfigs = await prisma.systemConfiguration.findMany({
+    where: {
+      organizationId: { in: organizationIds },
+      category: "general",
+      key: { in: ["site_title", "site_name"] },
+    },
+  });
+  
+  return organizations.map(org => ({
+    id: org.id,
+    name: org.name,
+    logoUrl: org.logoUrl,
+    siteTitle: siteTitleByOrg.get(org.id) ?? null,
+  }));
+}
+```
+
+## Module & Permission Structure
+
+### Module Hierarchy
+
+```prisma
+model Module {
+  id           String       @id @default(uuid())
+  name         String       @unique
+  slug         String       @unique  // e.g., "forest-patrimony"
+  description  String?
+  icon         String?      // UI icon identifier
+  routePath    String?      // e.g., "/forest/patrimony"
+  isActive     Boolean      @default(true)
+  displayOrder Int          @default(0)
+  parentId     String?      // For nested modules
+  
+  parent       Module?      @relation("ModuleHierarchy")
+  children     Module[]     @relation("ModuleHierarchy")
+  permissions  Permission[]
+}
+```
+
+**Example modules:**
+- `forest-patrimony` - Forest land management
+- `forest-biological-asset` - Biological assets (trees, plots)
+- `asset-measurement` - Field measurements and campaigns
+- `audit` - Audit log access
+- `user-management` - User and role administration
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Scope All Queries" icon="filter">
+    Always filter data by `organizationId` unless user is SUPER_ADMIN
+  </Card>
+  <Card title="Validate Org Access" icon="shield-check">
+    Check user has permission for the organization before data access
+  </Card>
+  <Card title="Audit Org Changes" icon="clock-rotate-left">
+    Log all organization modifications to AuditLog
+  </Card>
+  <Card title="Use Soft Deletes" icon="trash-arrow-up">
+    Set `deletedAt` instead of hard deleting organizations
+  </Card>
+</CardGroup>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock" href="/features/authentication">
+    User authentication and session management
+  </Card>
+  <Card title="Forest Patrimony" icon="tree" href="/features/forest-patrimony">
+    Organization-scoped land management
+  </Card>
+</CardGroup>

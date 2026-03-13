@@ -1,0 +1,312 @@
+---
+title: 'Organization Management'
+description: 'API endpoints for managing organizations in the SMyEG system'
+---
+
+## Overview
+
+The Organization Management API provides endpoints to create and list organizations within the SMyEG geospatial monitoring system. Organizations serve as the primary isolation boundary for all data and users in the system.
+
+## Authentication
+
+All organization endpoints require authentication. Access control is role-based:
+- **SUPER_ADMIN**: Can create and view all organizations
+- **ADMIN**: Can only view and edit their own organization
+- Other users: Need specific permissions (`organizations:READ`, `organizations:CREATE`)
+
+## Organization Hierarchy
+
+Organizations are the top-level entity in the system hierarchy:
+```
+Organization
+├── Users
+├── Roles
+├── Forest Patrimony Units (Level 2-6)
+├── Management Schemes
+├── Species Catalogs
+└── System Configurations
+```
+
+---
+
+## List Organizations
+
+<CodeGroup>
+```bash GET /api/organizations
+curl -X GET "https://api.smyeg.com/api/organizations" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Retrieves a list of organizations. 
+
+### Access Control
+
+- **SUPER_ADMIN**: Returns all active organizations
+- **ADMIN**: Returns only their own organization
+- **Other users**: Requires `organizations:READ` permission, returns scoped organizations
+
+### Response
+
+<ResponseField name="items" type="Organization[]" required>
+  Array of organization objects
+  
+  <Expandable title="Organization Object">
+    <ResponseField name="id" type="string" required>
+      UUID of the organization
+    </ResponseField>
+    
+    <ResponseField name="name" type="string" required>
+      Organization name
+    </ResponseField>
+    
+    <ResponseField name="rif" type="string">
+      RIF (tax identification number) from organization settings
+    </ResponseField>
+    
+    <ResponseField name="countryId" type="string">
+      UUID of the associated country
+    </ResponseField>
+    
+    <ResponseField name="createdAt" type="string" required>
+      ISO 8601 timestamp of organization creation
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json Response
+{
+  "items": [
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440001",
+      "name": "Acme Forest Corporation",
+      "rif": "J-123456789",
+      "countryId": "770e8400-e29b-41d4-a716-446655440020",
+      "createdAt": "2024-01-01T00:00:00Z"
+    },
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440002",
+      "name": "Green Planet Forestry",
+      "rif": "J-987654321",
+      "countryId": "770e8400-e29b-41d4-a716-446655440021",
+      "createdAt": "2024-02-15T08:30:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+---
+
+## Create Organization
+
+<CodeGroup>
+```bash POST /api/organizations
+curl -X POST "https://api.smyeg.com/api/organizations" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "New Forest Company",
+    "rif": "J-555666777",
+    "countryId": "770e8400-e29b-41d4-a716-446655440020"
+  }'
+```
+</CodeGroup>
+
+Creates a new organization in the system.
+
+### Required Permissions
+
+- **SUPER_ADMIN** role required
+- **ADMIN** users are explicitly forbidden from creating organizations
+- Other users need `organizations:CREATE` permission
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Organization name (minimum 2 characters, maximum 255 characters). A URL-friendly slug is automatically generated from this name.
+</ParamField>
+
+<ParamField body="rif" type="string" required>
+  RIF or tax identification number (minimum 2 characters, maximum 60 characters)
+</ParamField>
+
+<ParamField body="countryId" type="string">
+  UUID of the country. Can be empty string or valid UUID.
+</ParamField>
+
+### Response
+
+Returns the created organization object with status code `201`.
+
+<ResponseField name="id" type="string" required>
+  UUID of the created organization
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Organization name
+</ResponseField>
+
+<ResponseField name="rif" type="string" required>
+  RIF number
+</ResponseField>
+
+<ResponseField name="countryId" type="string">
+  UUID of the associated country (null if not provided)
+</ResponseField>
+
+<ResponseField name="createdAt" type="string" required>
+  ISO 8601 timestamp of organization creation
+</ResponseField>
+
+<ResponseExample>
+```json Response
+{
+  "id": "880e8400-e29b-41d4-a716-446655440030",
+  "name": "New Forest Company",
+  "rif": "J-555666777",
+  "countryId": "770e8400-e29b-41d4-a716-446655440020",
+  "createdAt": "2024-03-13T10:30:00Z"
+}
+```
+</ResponseExample>
+
+### Slug Generation
+
+The system automatically generates a URL-friendly slug from the organization name:
+- Converts to lowercase
+- Replaces spaces with hyphens
+- Removes special characters
+
+Example: `"Acme Forest Corporation"` → `"acme-forest-corporation"`
+
+### Error Responses
+
+<ResponseField name="409 Conflict">
+  Organization with same name (slug) already exists
+  ```json
+  {
+    "error": "Ya existe una organización con ese nombre"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="403 Forbidden">
+  ADMIN users attempting to create organizations
+  ```json
+  {
+    "error": "Un usuario ADMIN solo puede ver y editar su propia organización"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="400 Bad Request">
+  Invalid data or validation errors
+  ```json
+  {
+    "error": "Datos inválidos",
+    "details": {
+      "fieldErrors": {
+        "name": ["String must contain at least 2 character(s)"]
+      }
+    }
+  }
+  ```
+</ResponseField>
+
+---
+
+## Data Models
+
+### Organization Model (Prisma Schema)
+
+```typescript
+model Organization {
+  id                         String                       @id @default(uuid()) @db.Uuid
+  name                       String                       @db.VarChar(255)
+  slug                       String                       @unique @db.VarChar(100)
+  description                String?
+  logoUrl                    String?                      @db.VarChar(500)
+  countryId                  String?                      @db.Uuid
+  website                    String?                      @db.VarChar(255)
+  isActive                   Boolean                      @default(true)
+  settings                   Json?
+  country                    Country?                     @relation(fields: [countryId], references: [id])
+  createdAt                  DateTime                     @default(now())
+  updatedAt                  DateTime                     @updatedAt
+  deletedAt                  DateTime?
+  
+  // Relations
+  roles                      Role[]
+  users                      User[]
+  systemConfigurations       SystemConfiguration[]
+  auditLogs                  AuditLog[]
+  fileUploads                FileUpload[]
+  forestPatrimonyLevel2Units ForestPatrimonyLevel2[]
+  managementSchemes          ManagementScheme[]
+  inventoryTypes             ForestInventoryTypeCatalog[]
+  imaClasses                 ImaClass[]
+  species                    Species[]
+  provenances                Provenance[]
+  vegetalMaterials           VegetalMaterial[]
+  landUseTypes               LandUseType[]
+  spacings                   Spacing[]
+  productTypes               ProductType[]
+  landPatrimonialVariations  LandPatrimonialVariation[]
+  geoVariationJobs           GeoLandVariationJob[]
+  assetMeasurementCampaigns  AssetMeasurementCampaign[]
+  assetCalculationJobs       AssetCalculationJob[]
+}
+```
+
+### Settings JSON Structure
+
+The `settings` field is a flexible JSON object that can contain:
+
+```typescript
+{
+  rif?: string;           // Tax identification number
+  // Additional custom settings can be added
+}
+```
+
+---
+
+## Related Entities
+
+Organizations are the parent entity for:
+
+### Forest Patrimony Hierarchy
+- **Level 2**: FINCA, PREDIO, HATO, FUNDO, HACIENDA, ABRAE
+- **Level 3**: COMPARTIMIENTO, BLOCK, SECCION, LOTE, ZONA, BLOQUE, ZONIFICACION
+- **Level 4**: RODAL, PARCELA, ENUMERATION, UNIDAD_DE_MANEJO, CONUCO, OTRO_USO
+- **Level 5**: REFERENCIA, SUBUNIDAD, SUBPARCELA, MUESTRA, SUBMUESTRA
+- **Level 6**: Biological Assets
+
+### Management Data
+- Management Schemes
+- Forest Inventory Type Catalogs
+- IMA Classes
+- Species
+- Provenances
+- Vegetal Materials
+- Land Use Types
+- Spacing Configurations
+- Product Types
+
+### Operational Data
+- Land Patrimonial Variations
+- Geo Variation Jobs
+- Asset Measurement Campaigns
+- Asset Calculation Jobs
+
+---
+
+## Best Practices
+
+1. **Unique Names**: Ensure organization names are unique before creation
+2. **Country Association**: Always associate organizations with a country for proper geospatial context
+3. **RIF Format**: Follow standard tax ID formats for your country
+4. **Settings**: Use the settings JSON field for custom organization-specific configurations
+5. **Soft Deletes**: Organizations use `deletedAt` for soft deletion - they are never hard deleted

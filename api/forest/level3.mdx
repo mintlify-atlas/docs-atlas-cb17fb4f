@@ -1,0 +1,442 @@
+---
+title: 'Forest Patrimony Level 3'
+description: 'Manage forest compartments, blocks, and zones within Level 2 properties'
+---
+
+## Overview
+
+ForestPatrimonyLevel3 represents intermediate organizational units within a Level 2 property. These are typically compartments (COMPARTIMIENTO), blocks (BLOCK/BLOQUE), sections (SECCION), lots (LOTE), or zones (ZONA/ZONIFICACION).
+
+<Info>
+  Level 3 units belong to a Level 2 parent and contain Level 4 units (stands, plots). They help organize large properties into manageable sections.
+</Info>
+
+## Hierarchy
+
+```
+ForestPatrimonyLevel2 (Parent)
+└── ForestPatrimonyLevel3 ← Current Level
+    └── ForestPatrimonyLevel4 (Child)
+```
+
+## Enum: PatrimonyLevel3Type
+
+Supported level 3 types:
+
+| Value | Description |
+|-------|-------------|
+| `COMPARTIMIENTO` | Compartment |
+| `BLOCK` | Block |
+| `SECCION` | Section |
+| `LOTE` | Lot |
+| `ZONA` | Zone |
+| `BLOQUE` | Block (Spanish) |
+| `ZONIFICACION` | Zoning |
+
+## Endpoints
+
+### List Level 3 Units
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.smyeg.com/api/forest/patrimony?level=3&parentId=uuid-level2&page=1&limit=25" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch(
+  'https://api.smyeg.com/api/forest/patrimony?level=3&parentId=uuid-level2',
+  {
+    method: 'GET',
+    headers: {
+      'Authorization': 'Bearer YOUR_TOKEN'
+    }
+  }
+);
+const data = await response.json();
+```
+</CodeGroup>
+
+#### Query Parameters
+
+<ParamField query="level" type="string" required>
+  Must be `"3"` for Level 3 units
+</ParamField>
+
+<ParamField query="parentId" type="string">
+  Filter by Level 2 parent ID (UUID)
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number for pagination
+</ParamField>
+
+<ParamField query="limit" type="integer" default="25">
+  Number of records per page (max 100)
+</ParamField>
+
+<ParamField query="search" type="string">
+  Search by code or name (case-insensitive)
+</ParamField>
+
+#### Response
+
+<ResponseField name="items" type="array">
+  Array of Level 3 units
+  
+  <Expandable title="Level 3 Unit Object">
+    <ResponseField name="id" type="string">
+      Unique identifier (UUID)
+    </ResponseField>
+    
+    <ResponseField name="level2Id" type="string">
+      Parent Level 2 unit ID
+    </ResponseField>
+    
+    <ResponseField name="code" type="string">
+      Unique code within Level 2 parent (max 80 chars)
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Unit name (max 255 chars)
+    </ResponseField>
+    
+    <ResponseField name="type" type="enum">
+      One of: `COMPARTIMIENTO`, `BLOCK`, `SECCION`, `LOTE`, `ZONA`, `BLOQUE`, `ZONIFICACION`
+    </ResponseField>
+    
+    <ResponseField name="totalAreaHa" type="decimal">
+      Total area in hectares (12,2 precision)
+    </ResponseField>
+    
+    <ResponseField name="centroidLatitude" type="decimal" optional>
+      Centroid latitude (10,7 precision)
+    </ResponseField>
+    
+    <ResponseField name="centroidLongitude" type="decimal" optional>
+      Centroid longitude (10,7 precision)
+    </ResponseField>
+    
+    <ResponseField name="lastInfoDate" type="datetime" optional>
+      Last information update date
+    </ResponseField>
+    
+    <ResponseField name="isActive" type="boolean">
+      Whether the unit is active
+    </ResponseField>
+    
+    <ResponseField name="createdAt" type="datetime">
+      Creation timestamp
+    </ResponseField>
+    
+    <ResponseField name="updatedAt" type="datetime">
+      Last update timestamp
+    </ResponseField>
+    
+    <ResponseField name="level2" type="object">
+      Parent Level 2 information
+      <Expandable title="level2 object">
+        <ResponseField name="id" type="string">
+          Level 2 unit ID
+        </ResponseField>
+        <ResponseField name="code" type="string">
+          Level 2 unit code
+        </ResponseField>
+        <ResponseField name="name" type="string">
+          Level 2 unit name
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="pagination" type="object">
+  Pagination metadata (same structure as Level 2)
+</ResponseField>
+
+### Create Level 3 Unit
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.smyeg.com/api/forest/patrimony" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "level": "3",
+    "data": {
+      "level2Id": "uuid-of-level2",
+      "code": "COMP-001",
+      "name": "Compartimiento Norte",
+      "type": "COMPARTIMIENTO",
+      "totalAreaHa": 250.75,
+      "isActive": true
+    }
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.smyeg.com/api/forest/patrimony', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    level: '3',
+    data: {
+      level2Id: 'uuid-of-level2',
+      code: 'COMP-001',
+      name: 'Compartimiento Norte',
+      type: 'COMPARTIMIENTO',
+      totalAreaHa: 250.75,
+      isActive: true
+    }
+  })
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+#### Request Body
+
+<ParamField body="level" type="string" required>
+  Must be `"3"`
+</ParamField>
+
+<ParamField body="data" type="object" required>
+  <Expandable title="data properties">
+    <ParamField body="level2Id" type="string" required>
+      UUID of the parent Level 2 unit
+    </ParamField>
+    
+    <ParamField body="code" type="string" required>
+      Unique code within Level 2 parent (max 80 chars)
+    </ParamField>
+    
+    <ParamField body="name" type="string" required>
+      Unit name (max 255 chars)
+    </ParamField>
+    
+    <ParamField body="type" type="enum" required>
+      One of: `COMPARTIMIENTO`, `BLOCK`, `SECCION`, `LOTE`, `ZONA`, `BLOQUE`, `ZONIFICACION`
+    </ParamField>
+    
+    <ParamField body="totalAreaHa" type="decimal" required>
+      Total area in hectares
+    </ParamField>
+    
+    <ParamField body="centroidLatitude" type="decimal" optional>
+      Centroid latitude
+    </ParamField>
+    
+    <ParamField body="centroidLongitude" type="decimal" optional>
+      Centroid longitude
+    </ParamField>
+    
+    <ParamField body="isActive" type="boolean" default="true">
+      Whether the unit is active
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<Note>
+  The code must be unique within the Level 2 parent. The same code can exist in different Level 2 units.
+</Note>
+
+#### Response
+
+Returns the created Level 3 unit object with HTTP status 201, including the `level2` parent information.
+
+### Update Level 3 Unit
+
+<CodeGroup>
+```bash cURL
+curl -X PATCH "https://api.smyeg.com/api/forest/patrimony" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "level": "3",
+    "id": "uuid-here",
+    "data": {
+      "name": "Compartimiento Norte Actualizado",
+      "totalAreaHa": 255.00
+    }
+  }'
+```
+</CodeGroup>
+
+#### Request Body
+
+<ParamField body="level" type="string" required>
+  Must be `"3"`
+</ParamField>
+
+<ParamField body="id" type="string" required>
+  UUID of the Level 3 unit to update
+</ParamField>
+
+<ParamField body="data" type="object" required>
+  Object with fields to update (partial update supported)
+</ParamField>
+
+### Delete Level 3 Unit
+
+<Warning>
+  A Level 3 unit cannot be deleted if it has child Level 4 units. Delete all child units first.
+</Warning>
+
+<CodeGroup>
+```bash cURL
+curl -X DELETE "https://api.smyeg.com/api/forest/patrimony" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "level": "3",
+    "id": "uuid-here"
+  }'
+```
+</CodeGroup>
+
+## Import Level 3 Units
+
+### Bulk Import from CSV/Excel
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.smyeg.com/api/forest/patrimony/import" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "file=@patrimony_level3.xlsx" \
+  -F "level=3" \
+  -F "parentId=uuid-of-level2"
+```
+</CodeGroup>
+
+<Warning>
+  The `parentId` parameter is **required** when importing Level 3 units. All imported units will be assigned to this Level 2 parent.
+</Warning>
+
+#### Form Data
+
+<ParamField formData="file" type="file" required>
+  CSV or XLSX file with Level 3 data
+</ParamField>
+
+<ParamField formData="level" type="string" required>
+  Must be `"3"`
+</ParamField>
+
+<ParamField formData="parentId" type="string" required>
+  UUID of the Level 2 parent unit
+</ParamField>
+
+#### Required Columns
+
+| Column | Type | Required | Description |
+|--------|------|----------|-------------|
+| code | string | Yes | Unique unit code (within parent) |
+| name | string | Yes | Unit name |
+| type | enum | Yes | Level 3 type |
+| totalAreaHa | decimal | Yes | Total area in hectares |
+| isActive | boolean | No | Active status (default: true) |
+
+#### Response
+
+<ResponseField name="created" type="integer">
+  Number of new units created
+</ResponseField>
+
+<ResponseField name="updated" type="integer">
+  Number of existing units updated
+</ResponseField>
+
+<ResponseField name="skipped" type="integer">
+  Number of rows skipped due to errors
+</ResponseField>
+
+<ResponseField name="errors" type="array">
+  Array of error details for failed rows
+  <Expandable title="Error object">
+    <ResponseField name="row" type="integer">
+      Row number in the file (1-indexed)
+    </ResponseField>
+    <ResponseField name="code" type="string">
+      Unit code from the row
+    </ResponseField>
+    <ResponseField name="error" type="string">
+      Error message
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Export Level 3 Units
+
+### Export to CSV/Excel
+
+<CodeGroup>
+```bash cURL (CSV)
+curl -X GET "https://api.smyeg.com/api/forest/patrimony/export?level=3&parentId=uuid-level2&format=csv" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -o patrimony_level3.csv
+```
+
+```bash cURL (Excel)
+curl -X GET "https://api.smyeg.com/api/forest/patrimony/export?level=3&parentId=uuid-level2&format=xlsx" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -o patrimony_level3.xlsx
+```
+</CodeGroup>
+
+<Warning>
+  The `parentId` parameter is **required** when exporting Level 3 units.
+</Warning>
+
+#### Query Parameters
+
+<ParamField query="level" type="string" required>
+  Must be `"3"`
+</ParamField>
+
+<ParamField query="parentId" type="string" required>
+  UUID of the Level 2 parent unit
+</ParamField>
+
+<ParamField query="format" type="enum" default="csv">
+  Export format: `csv` or `xlsx`
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100" max="5000">
+  Maximum records to export
+</ParamField>
+
+<ParamField query="search" type="string">
+  Filter by code or name
+</ParamField>
+
+<ParamField query="sortBy" type="enum" default="code">
+  Sort by: `code`, `name`, `type`, `totalAreaHa`, `isActive`
+</ParamField>
+
+<ParamField query="sortOrder" type="enum" default="asc">
+  Sort order: `asc` or `desc`
+</ParamField>
+
+## Permissions
+
+| Action | Permission Required |
+|--------|--------------------|
+| List units | `forest-patrimony:READ` |
+| Create unit | `forest-patrimony:CREATE` |
+| Update unit | `forest-patrimony:UPDATE` |
+| Delete unit | `forest-patrimony:DELETE` |
+| Import units | `forest-patrimony:CREATE` |
+| Export units | `forest-patrimony:READ` |
+
+<Note>
+  Users can only access Level 3 units whose Level 2 parent belongs to their organization, unless they have SUPER_ADMIN role.
+</Note>
+
+## Related
+
+- [Forest Patrimony Level 2](/api/forest/level2) - Parent properties and farms
+- [Forest Patrimony Level 4](/api/forest/level4) - Child stands and management units
+- [Geospatial Import](/api/geo/import-jobs) - Import geometries from shapefiles

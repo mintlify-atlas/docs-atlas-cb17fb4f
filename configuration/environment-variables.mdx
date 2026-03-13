@@ -1,0 +1,270 @@
+---
+title: Environment Variables
+description: Complete reference for all environment variables used in SMyEG
+---
+
+## Overview
+
+SMyEG uses environment variables to configure the application, database connections, background workers, and API limits. All environment variables are read from `.env` files in the project root.
+
+## Core Application
+
+### Database Connection
+
+<ParamField path="DATABASE_URL" type="string" required>
+  PostgreSQL connection string for Prisma ORM.
+  
+  **Format:** `postgresql://USER:PASSWORD@HOST:PORT/DATABASE`
+  
+  **Example:** `postgresql://postgres:postgres@localhost:5432/app_dev`
+</ParamField>
+
+### Authentication
+
+<ParamField path="NEXTAUTH_SECRET" type="string" required>
+  Secret key used by NextAuth.js v5 to encrypt JWT tokens and session data.
+  
+  Generate with: `openssl rand -base64 32`
+  
+  **Security:** Keep this secret secure and never commit to version control.
+</ParamField>
+
+<ParamField path="NEXTAUTH_URL" type="string">
+  The canonical URL of your application. Used by NextAuth.js for redirects.
+  
+  **Default:** `http://localhost:3000` (development)
+  
+  **Production example:** `https://smyeg.example.com`
+</ParamField>
+
+### Node Environment
+
+<ParamField path="NODE_ENV" type="string">
+  Node.js environment mode. Affects logging, error handling, and Prisma query logging.
+  
+  **Values:**
+  - `development` - Enables verbose logging including database queries
+  - `production` - Minimal logging, optimized performance
+  - `test` - Used for automated testing
+  
+  **Default:** `development`
+</ParamField>
+
+## Background Workers
+
+### Geo Worker (Geospatial Processing)
+
+The geo worker handles asynchronous import, recalculation, and variation processing for geospatial data.
+
+<ParamField path="GEO_WORKER_INTERVAL_MS" type="number">
+  Polling interval in milliseconds for the geo worker scheduler.
+  
+  **Default:** `4000` (4 seconds)
+  
+  **Source:** `src/workers/geo-worker-scheduler.ts:5`
+</ParamField>
+
+<ParamField path="GEO_IMPORT_BATCH_SIZE" type="number">
+  Maximum number of import jobs processed per cycle.
+  
+  **Default:** `5`
+  
+  **Source:** `src/workers/geo-worker-scheduler.ts:6`
+</ParamField>
+
+<ParamField path="GEO_RECALC_BATCH_SIZE" type="number">
+  Maximum number of geometry recalculation jobs processed per cycle.
+  
+  **Default:** `10`
+  
+  **Source:** `src/workers/geo-worker-scheduler.ts:7`
+</ParamField>
+
+<ParamField path="GEO_VARIATION_BATCH_SIZE" type="number">
+  Maximum number of patrimonial variation jobs (split/merge operations) processed per cycle.
+  
+  **Default:** `15`
+  
+  **Source:** `src/workers/geo-worker-scheduler.ts:8`
+</ParamField>
+
+<ParamField path="GEO_WORKER_RUN_ONCE" type="boolean">
+  Execute one cycle and exit. Useful for testing or manual execution.
+  
+  **Default:** `false`
+  
+  **Values:** `true` or `false`
+  
+  **Source:** `src/workers/geo-worker-scheduler.ts:9`
+</ParamField>
+
+<ParamField path="GEO_WORKER_SECRET" type="string" required>
+  Secret token for authenticating worker API endpoints.
+  
+  **Security:** Required to prevent unauthorized job processing.
+  
+  **Source:** `src/app/api/forest/geo/import/worker/route.ts:11`
+</ParamField>
+
+### Asset Measurement Worker
+
+The asset measurement worker processes biological, hydrological, dendrometric, and demographic measurement campaigns.
+
+<ParamField path="ASSET_MEASUREMENT_WORKER_INTERVAL_MS" type="number">
+  Polling interval in milliseconds for the asset measurement worker scheduler.
+  
+  **Default:** `4000` (4 seconds)
+  
+  **Source:** `src/workers/asset-measurement-worker-scheduler.ts:5`
+</ParamField>
+
+<ParamField path="ASSET_MEASUREMENT_WORKER_BATCH_SIZE" type="number">
+  Maximum number of calculation jobs processed per cycle.
+  
+  **Default:** `20`
+  
+  **Source:** `src/workers/asset-measurement-worker-scheduler.ts:6`
+</ParamField>
+
+<ParamField path="ASSET_MEASUREMENT_WORKER_RUN_ONCE" type="boolean">
+  Execute one cycle and exit. Useful for testing or manual execution.
+  
+  **Default:** `false`
+  
+  **Values:** `true` or `false`
+  
+  **Source:** `src/workers/asset-measurement-worker-scheduler.ts:7`
+</ParamField>
+
+<ParamField path="ASSET_MEASUREMENT_WORKER_SECRET" type="string" required>
+  Secret token for authenticating asset worker API endpoints.
+  
+  **Security:** Required to prevent unauthorized calculation job processing.
+  
+  **Source:** `src/app/api/assets/calculation-jobs/worker/route.ts:10`
+</ParamField>
+
+## Export Limits
+
+These variables control maximum record limits for data export operations to prevent performance issues.
+
+### User & System Management
+
+<ParamField path="USERS_EXPORT_MAX_LIMIT" type="number">
+  Maximum number of user records that can be exported at once.
+  
+  **Default:** No limit (not recommended for production)
+  
+  **Recommended:** `10000`
+  
+  **Source:** `src/app/api/users/export/route.ts:8`
+</ParamField>
+
+<ParamField path="ROLES_EXPORT_MAX_LIMIT" type="number">
+  Maximum number of role records that can be exported at once.
+  
+  **Source:** `src/app/api/roles/export/route.ts:15`
+</ParamField>
+
+<ParamField path="ORGANIZATIONS_EXPORT_MAX_LIMIT" type="number">
+  Maximum number of organization records that can be exported at once.
+  
+  **Source:** `src/app/api/organizations/export/route.ts:32`
+</ParamField>
+
+### Forest & Patrimony Data
+
+<ParamField path="FOREST_PATRIMONY_EXPORT_MAX_LIMIT" type="number">
+  Maximum number of forest patrimony (Level 2-4) records that can be exported.
+  
+  **Source:** `src/app/api/forest/patrimony/export/route.ts:12`
+</ParamField>
+
+<ParamField path="FOREST_BIOLOGICAL_ASSET_EXPORT_MAX_LIMIT" type="number">
+  Maximum number of biological asset (Level 6) records that can be exported.
+  
+  **Source:** `src/app/api/forest/biological-assets/export/route.ts:24`
+</ParamField>
+
+<ParamField path="FOREST_CONFIG_EXPORT_MAX_LIMIT" type="number">
+  Maximum number of forest configuration records (species, spacing, IMA classes, etc.).
+  
+  **Note:** Used as fallback for `GENERAL_CONFIG_EXPORT_MAX_LIMIT`
+  
+  **Source:** Multiple forest config export routes
+</ParamField>
+
+### General Configuration
+
+<ParamField path="GENERAL_CONFIG_EXPORT_MAX_LIMIT" type="number">
+  Maximum number of general configuration records (countries, regions, cities, etc.).
+  
+  **Fallback:** `FOREST_CONFIG_EXPORT_MAX_LIMIT` if not set
+  
+  **Source:** Multiple general config export routes
+</ParamField>
+
+### Asset Measurements
+
+<ParamField path="MEASUREMENT_CAMPAIGNS_EXPORT_MAX_LIMIT" type="number">
+  Maximum number of asset measurement campaign records that can be exported.
+  
+  **Source:** `src/app/api/assets/measurement-campaigns/export/route.ts:10`
+</ParamField>
+
+<ParamField path="MEASUREMENT_OBSERVATIONS_EXPORT_MAX_LIMIT" type="number">
+  Maximum number of measurement observation records that can be exported.
+  
+  **Note:** Observations can be very numerous; set appropriate limits.
+  
+  **Source:** `src/app/api/assets/measurement-observations/export/route.ts:151`
+</ParamField>
+
+## Example Configuration
+
+```bash .env
+# Database
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/app_dev"
+
+# Authentication
+NEXTAUTH_SECRET="your-secret-key-here"
+NEXTAUTH_URL="http://localhost:3000"
+
+# Environment
+NODE_ENV="development"
+
+# Geo Worker
+GEO_WORKER_INTERVAL_MS="4000"
+GEO_IMPORT_BATCH_SIZE="5"
+GEO_RECALC_BATCH_SIZE="10"
+GEO_VARIATION_BATCH_SIZE="15"
+GEO_WORKER_SECRET="your-geo-worker-secret"
+
+# Asset Measurement Worker
+ASSET_MEASUREMENT_WORKER_INTERVAL_MS="4000"
+ASSET_MEASUREMENT_WORKER_BATCH_SIZE="20"
+ASSET_MEASUREMENT_WORKER_SECRET="your-asset-worker-secret"
+
+# Export Limits
+USERS_EXPORT_MAX_LIMIT="10000"
+FOREST_PATRIMONY_EXPORT_MAX_LIMIT="50000"
+FOREST_BIOLOGICAL_ASSET_EXPORT_MAX_LIMIT="100000"
+MEASUREMENT_OBSERVATIONS_EXPORT_MAX_LIMIT="500000"
+```
+
+## Security Best Practices
+
+<Warning>
+  Never commit `.env` files containing sensitive credentials to version control.
+</Warning>
+
+1. **Use strong secrets**: Generate cryptographically secure random strings for all secret variables
+2. **Rotate regularly**: Change worker secrets and auth secrets periodically
+3. **Environment-specific**: Use different secrets for development, staging, and production
+4. **Limit access**: Restrict who can view production environment variables
+5. **Use secret management**: Consider using services like AWS Secrets Manager or HashiCorp Vault for production
+
+## Related Documentation
+
+- [Database Setup](/configuration/database-setup) - PostgreSQL and PostGIS configuration
+- [Workers](/configuration/workers) - Background worker setup and management

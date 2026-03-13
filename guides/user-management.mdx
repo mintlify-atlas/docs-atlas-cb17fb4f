@@ -1,0 +1,212 @@
+---
+title: User Management
+description: Managing users, roles, and permissions in SMyEG
+icon: users
+---
+
+## Overview
+
+SMyEG implements a multi-organization user management system with role-based access control (RBAC). Each user belongs to a single organization and can have multiple roles that define their permissions.
+
+<Warning>
+  **Organization Isolation**: Users can only view and manage other users within their own organization. SUPER_ADMIN users have cross-organization access.
+</Warning>
+
+## User Statuses
+
+Users can have the following statuses:
+
+- **ACTIVE** - User can log in and access the system
+- **INACTIVE** - User account is disabled
+- **PENDING_VERIFICATION** - User needs to verify their email
+- **LOCKED** - Account is temporarily locked (e.g., after failed login attempts)
+- **DELETED** - Soft-deleted user
+
+## Creating a New User
+
+<Steps>
+  <Step title="Navigate to User Management">
+    Go to **Settings** → **Users** from the main navigation menu.
+  </Step>
+  
+  <Step title="Click Create User">
+    Click the **New User** button in the top right corner.
+  </Step>
+  
+  <Step title="Fill in User Details">
+    Provide the following information:
+    - **Email** (required) - Must be unique across the system
+    - **First Name** (optional)
+    - **Last Name** (optional)
+    - **Organization** (required) - Automatically set to your organization
+    - **Role** (required) - Select from available roles
+    - **Password** (optional) - If not provided, a random password is generated
+  </Step>
+  
+  <Step title="Save the User">
+    Click **Create** to save the user. If no password was provided, the user status will be `PENDING_VERIFICATION`.
+  </Step>
+</Steps>
+
+### Example API Request
+
+```json
+{
+  "email": "user@example.com",
+  "firstName": "John",
+  "lastName": "Doe",
+  "organizationId": "123e4567-e89b-12d3-a456-426614174000",
+  "roleSlug": "FIELD_TECHNICIAN",
+  "password": "SecurePass123!"
+}
+```
+
+## Viewing and Filtering Users
+
+### Search and Filter Options
+
+- **Search** - Search by email, first name, or last name
+- **Status Filter** - Filter by user status (ACTIVE, INACTIVE, etc.)
+- **Role Filter** - Filter users by assigned role
+- **Organization Filter** (SUPER_ADMIN only) - View users from other organizations
+
+### Sorting Options
+
+- Sort by email (A-Z or Z-A)
+- Sort by status
+- Sort by creation date (newest or oldest first)
+
+## Updating User Information
+
+<Steps>
+  <Step title="Find the User">
+    Use search or filters to locate the user you want to update.
+  </Step>
+  
+  <Step title="Click Edit">
+    Click the edit icon next to the user's name.
+  </Step>
+  
+  <Step title="Modify Fields">
+    Update any of the following:
+    - Name and contact information
+    - User status (to activate, deactivate, or lock accounts)
+    - Assigned roles
+  </Step>
+  
+  <Step title="Save Changes">
+    Click **Save** to apply the changes. All modifications are logged in the audit trail.
+  </Step>
+</Steps>
+
+<Warning>
+  Changing a user's status to INACTIVE will immediately revoke their access to the system.
+</Warning>
+
+## Managing User Roles
+
+Users can have multiple roles assigned simultaneously. Each role assignment includes:
+
+- **Role** - The role being assigned
+- **Assigned At** - When the role was granted
+- **Assigned By** - Who granted the role
+- **Expires At** (optional) - When the role assignment expires
+- **Is Active** - Whether the assignment is currently active
+
+### Assigning Additional Roles
+
+<Steps>
+  <Step title="Edit User">
+    Open the user edit form.
+  </Step>
+  
+  <Step title="Add Role">
+    Click **Add Role** and select from available roles in your organization.
+  </Step>
+  
+  <Step title="Set Expiration (Optional)">
+    If the role should be temporary, set an expiration date.
+  </Step>
+  
+  <Step title="Save">
+    Click **Save** to apply the role assignment.
+  </Step>
+</Steps>
+
+## Security Features
+
+### Failed Login Protection
+
+The system tracks failed login attempts:
+- Failed attempts are counted per user
+- After exceeding the threshold, the account is automatically locked
+- `lockedUntil` timestamp is set
+
+### Multi-Factor Authentication (MFA)
+
+Users can enable MFA for enhanced security:
+- `mfaEnabled` flag controls MFA requirement
+- `mfaSecret` stores the TOTP secret
+- `mfaBackupCodes` provides recovery options
+
+### Session Management
+
+Each user session includes:
+- Token hash for authentication
+- IP address and user agent tracking
+- Session expiration
+- Last activity timestamp
+
+## Permissions Required
+
+| Action | Required Permission |
+|--------|--------------------|
+| View users | `users:READ` or ADMIN/SUPER_ADMIN role |
+| Create users | `users:CREATE` or ADMIN/SUPER_ADMIN role |
+| Update users | `users:UPDATE` or ADMIN/SUPER_ADMIN role |
+| Delete users | `users:DELETE` or ADMIN/SUPER_ADMIN role |
+| Export users | `users:EXPORT` or ADMIN/SUPER_ADMIN role |
+
+## Audit Trail
+
+All user management actions are logged:
+- User creation, updates, and deletions
+- Role assignments and removals
+- Login and logout events
+- Failed login attempts
+- Password resets
+
+Access the audit log at **Settings** → **Audit Logs**.
+
+## FAQ
+
+<Accordion title="Can a user belong to multiple organizations?">
+  No. Each user belongs to exactly one organization. If someone needs access to multiple organizations, separate user accounts must be created.
+</Accordion>
+
+<Accordion title="What happens when I delete a user?">
+  The user record is soft-deleted:
+  - `deletedAt` timestamp is set
+  - The user cannot log in
+  - Historical audit records are preserved
+  - The email address is freed for reuse after a grace period
+</Accordion>
+
+<Accordion title="How do I reset a user's password?">
+  Password resets are initiated via the login page. Users receive a password reset token via email. Administrators cannot view or set passwords directly after creation.
+</Accordion>
+
+<Accordion title="Can I import users in bulk?">
+  Yes. Use the **Import Users** feature at **Settings** → **Users** → **Import**. Download the CSV/Excel template first, then upload your completed file.
+</Accordion>
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="Roles & Permissions" icon="shield" href="/guides/roles-permissions">
+    Learn about the RBAC system and permission model
+  </Card>
+  <Card title="Authentication" icon="lock" href="/features/authentication">
+    Authentication providers and session management
+  </Card>
+</CardGroup>

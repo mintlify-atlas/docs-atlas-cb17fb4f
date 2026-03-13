@@ -1,0 +1,658 @@
+---
+title: Troubleshooting
+description: Common issues and solutions for SMyEG deployment
+---
+
+## Database Issues
+
+### Connection Refused
+
+**Symptoms**:
+```
+Error: connect ECONNREFUSED 127.0.0.1:5432
+```
+
+**Causes**:
+- PostgreSQL service not running
+- Incorrect `DATABASE_URL` in `.env`
+- Firewall blocking port 5432
+
+**Solutions**:
+
+<Steps>
+  <Step title="Verify PostgreSQL is Running">
+    <CodeGroup>
+    ```bash Docker
+    docker compose ps postgres
+    # Should show "Up"
+    ```
+    
+    ```bash Windows Service
+    sc query postgresql-x64-15
+    ```
+    
+    ```bash Linux
+    systemctl status postgresql
+    ```
+    </CodeGroup>
+  </Step>
+  
+  <Step title="Test Connection">
+    ```bash
+    psql "postgresql://postgres:postgres@localhost:5432/app_dev"
+    ```
+    
+    If this fails, PostgreSQL is not accessible.
+  </Step>
+  
+  <Step title="Check DATABASE_URL">
+    Verify `.env` contains correct credentials:
+    ```bash
+    DATABASE_URL="postgresql://user:password@host:port/database"
+    ```
+  </Step>
+  
+  <Step title="Restart PostgreSQL">
+    <CodeGroup>
+    ```bash Docker
+    docker compose restart postgres
+    ```
+    
+    ```bash Linux
+    sudo systemctl restart postgresql
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+### Migration Errors
+
+**Error**:
+```
+Error: P3009: migrate found failed migrations in the target database
+```
+
+**Cause**: Previous migration was interrupted or failed.
+
+**Solution**:
+
+```bash
+# Mark migration as rolled back
+pm2 prisma migrate resolve --rolled-back "20240101000000_migration_name"
+
+# Re-run migrations
+npm run db:migrate
+```
+
+### PostGIS Extension Missing
+
+**Error**:
+```
+ERROR: type "geometry" does not exist
+```
+
+**Solution**: Install PostGIS extension:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS postgis_topology;
+```
+
+For Docker:
+```bash
+docker compose exec postgres psql -U postgres -d app_dev -c "CREATE EXTENSION postgis;"
+```
+
+### Slow Queries
+
+**Symptom**: API requests timeout or take > 5 seconds.
+
+**Diagnosis**:
+
+```sql
+-- Find slow queries
+SELECT query, calls, mean_exec_time
+FROM pg_stat_statements
+WHERE mean_exec_time > 1000  -- Over 1 second
+ORDER BY mean_exec_time DESC;
+```
+
+**Solutions**:
+
+1. **Add missing indexes**:
+   ```sql
+   -- Spatial index
+   CREATE INDEX idx_nivel4_geometry ON nivel4_areas USING GIST(geometry);
+   
+   -- Composite index
+   CREATE INDEX idx_jobs_status_created ON shapefile_import_jobs(status, created_at);
+   ```
+
+2. **Analyze query plans**:
+   ```sql
+   EXPLAIN ANALYZE
+   SELECT * FROM nivel4_areas WHERE organization_id = 123;
+   ```
+
+3. **Update statistics**:
+   ```sql
+   ANALYZE nivel4_areas;
+   ```
+
+## Redis Issues
+
+### Connection Timeout
+
+**Error**:
+```
+Error: Redis connection timeout
+```
+
+**Solutions**:
+
+<Steps>
+  <Step title="Verify Redis is Running">
+    ```bash
+    docker compose ps redis
+    # Or
+    redis-cli ping
+    # Expected: PONG
+    ```
+  </Step>
+  
+  <Step title="Check REDIS_URL">
+    ```bash .env
+    REDIS_URL="redis://localhost:6379"
+    # Or for password-protected:
+    REDIS_URL="redis://:password@localhost:6379"
+    ```
+  </Step>
+  
+  <Step title="Restart Redis">
+    ```bash
+    docker compose restart redis
+    ```
+  </Step>
+</Steps>
+
+### Session Data Lost
+
+**Symptom**: Users logged out after server restart.
+
+**Cause**: Redis configured without persistence.
+
+**Solution**: Enable AOF persistence in `docker-compose.yml`:
+
+```yaml
+redis:
+  command: redis-server --appendonly yes
+  volumes:
+    - redisdata:/data
+```
+
+Restart Redis:
+```bash
+docker compose up -d redis
+```
+
+## Worker Issues
+
+### Geo Worker Not Processing Jobs
+
+**Symptoms**:
+- Shapefile imports stuck in "pending" status
+- No log output from worker
+- Dashboard shows queued imports
+
+**Diagnosis**:
+
+<Steps>
+  <Step title="Check Worker Status">
+    ```bash
+    pm2 status confor-geo-worker
+    ```
+    
+    Status should be "online". If "stopped" or "errored":
+    ```bash
+    pm2 logs confor-geo-worker --err --lines 50
+    ```
+  </Step>
+  
+  <Step title="Verify Job Queue">
+    ```sql
+    SELECT status, COUNT(*) 
+    FROM shapefile_import_jobs 
+    GROUP BY status;
+    ```
+    
+    Look for jobs in "pending" state.
+  </Step>
+  
+  <Step title="Check Environment Variables">
+    ```bash
+    pm2 show confor-geo-worker | grep -A 20 "env:"
+    ```
+    
+    Ensure `GEO_WORKER_INTERVAL_MS` and batch sizes are set.
+  </Step>
+  
+  <Step title="Test Manual Run">
+    ```bash
+    pnpm worker:geo:once
+    ```
+    
+    If this processes jobs, PM2 configuration is incorrect.
+  </Step>
+</Steps>
+
+**Solutions**:
+
+1. **Restart worker**:
+   ```bash
+   pm2 restart confor-geo-worker
+   ```
+
+2. **Reset stuck jobs**:
+   ```sql
+   UPDATE shapefile_import_jobs
+   SET status = 'pending', updated_at = NOW()
+   WHERE status = 'processing'
+     AND updated_at < NOW() - INTERVAL '1 hour';
+   ```
+
+3. **Increase logging**:
+   ```bash .env
+   LOG_LEVEL=debug
+   ```
+
+### Worker Crashes on Startup
+
+**Error**:
+```
+[geo-worker] Error: Cannot find module '@/lib/prisma'
+```
+
+**Cause**: Prisma client not generated.
+
+**Solution**:
+```bash
+npm run db:generate
+pm2 restart confor-geo-worker
+```
+
+### High Memory Usage
+
+**Symptom**: Worker memory grows to 2+ GB and crashes.
+
+**Diagnosis**:
+
+```bash
+pm2 monit
+# Watch memory column for confor-geo-worker
+```
+
+**Solutions**:
+
+1. **Set memory limit**:
+   ```javascript ecosystem.config.cjs
+   {
+     name: "confor-geo-worker",
+     max_memory_restart: "1G",
+   }
+   ```
+
+2. **Reduce batch sizes**:
+   ```bash .env
+   GEO_IMPORT_BATCH_SIZE=5
+   GEO_RECALC_BATCH_SIZE=10
+   ```
+
+3. **Check for memory leaks**:
+   - Review shapefile processing code
+   - Ensure large buffers are released
+   - Close file handles after processing
+
+## Application Issues
+
+### Next.js Build Fails
+
+**Error**:
+```
+Error: Cannot find module 'next'
+```
+
+**Solution**:
+```bash
+rm -rf node_modules package-lock.json
+npm install
+npm run build
+```
+
+### Port Already in Use
+
+**Error**:
+```
+Error: listen EADDRINUSE: address already in use :::3000
+```
+
+**Solutions**:
+
+1. **Find and kill process**:
+   <CodeGroup>
+   ```bash Linux/Mac
+   lsof -ti:3000 | xargs kill -9
+   ```
+   
+   ```bash Windows
+   netstat -ano | findstr :3000
+   taskkill /PID <PID> /F
+   ```
+   </CodeGroup>
+
+2. **Use different port**:
+   ```bash .env
+   PORT=3001
+   ```
+
+### Authentication Fails
+
+**Symptom**: Users cannot log in, get "Invalid credentials" error.
+
+**Diagnosis**:
+
+<Steps>
+  <Step title="Check Database Connection">
+    ```sql
+    SELECT id, email FROM users WHERE email = 'admin@example.com';
+    ```
+    
+    If no results, seed data is missing.
+  </Step>
+  
+  <Step title="Verify AUTH_SECRET">
+    ```bash
+    # .env should contain:
+    AUTH_SECRET="<long-random-string>"
+    ```
+    
+    If missing or changed after sessions created, users must re-login.
+  </Step>
+  
+  <Step title="Check Redis">
+    ```bash
+    redis-cli -u $REDIS_URL
+    KEYS "session:*"
+    ```
+    
+    Should show active sessions.
+  </Step>
+</Steps>
+
+**Solutions**:
+
+1. **Reseed database**:
+   ```bash
+   npm run db:seed
+   ```
+
+2. **Clear sessions**:
+   ```bash
+   redis-cli -u $REDIS_URL FLUSHDB
+   ```
+
+3. **Regenerate AUTH_SECRET**:
+   ```bash
+   openssl rand -base64 32
+   ```
+   
+   Update `.env` and restart app.
+
+### File Upload Fails
+
+**Error**:
+```
+Payload Too Large
+```
+
+**Cause**: Shapefile ZIP exceeds upload limit.
+
+**Solution**: Increase body size limit in Next.js config:
+
+```javascript next.config.js
+module.exports = {
+  api: {
+    bodyParser: {
+      sizeLimit: '50mb',
+    },
+  },
+};
+```
+
+Restart application:
+```bash
+pm2 restart confor-web
+```
+
+## PM2 Issues
+
+### PM2 Processes Don't Start on Boot
+
+**Symptom**: After Windows restart, `pm2 status` shows empty list.
+
+**Solution**:
+
+<Steps>
+  <Step title="Recreate Startup Script">
+    ```bash
+    pm2 startup
+    ```
+    
+    Run the command PM2 displays (requires admin privileges).
+  </Step>
+  
+  <Step title="Start Processes">
+    ```bash
+    pm2 start ecosystem.config.cjs
+    ```
+  </Step>
+  
+  <Step title="Save Process List">
+    ```bash
+    pm2 save
+    ```
+  </Step>
+  
+  <Step title="Test">
+    Restart computer and verify:
+    ```bash
+    pm2 status
+    ```
+  </Step>
+</Steps>
+
+### PM2 Commands Hang
+
+**Symptom**: `pm2 logs` or `pm2 monit` freezes.
+
+**Solution**: Kill and resurrect PM2 daemon:
+
+```bash
+pm2 kill
+pm2 resurrect
+```
+
+<Warning>
+  `pm2 kill` stops all processes. Use `pm2 resurrect` to restore them from saved state.
+</Warning>
+
+## Docker Issues
+
+### Volume Permission Errors
+
+**Error**:
+```
+PostgreSQL: data directory has wrong ownership
+```
+
+**Solution** (Linux only):
+
+```bash
+sudo chown -R 999:999 /var/lib/docker/volumes/smyeg_pgdata/_data
+docker compose restart postgres
+```
+
+### Containers Won't Start
+
+**Diagnosis**:
+
+```bash
+docker compose logs
+```
+
+**Common issues**:
+
+1. **Port conflict**:
+   ```yaml docker-compose.yml
+   ports:
+     - "5433:5432"  # Change host port
+   ```
+
+2. **Insufficient memory**:
+   ```bash
+   docker system df
+   docker system prune
+   ```
+
+3. **Corrupted volumes**:
+   ```bash
+   docker compose down -v  # WARNING: Deletes data!
+   docker compose up -d
+   ```
+
+## Performance Issues
+
+### High CPU Usage
+
+**Diagnosis**:
+
+```bash
+pm2 monit
+# Identify which process is using CPU
+```
+
+**Solutions by process**:
+
+- **confor-web**: Check for infinite loops in API routes, optimize queries
+- **confor-geo-worker**: Reduce batch sizes, optimize geometry operations
+- **postgres**: Add indexes, analyze slow queries
+
+### Slow Page Loads
+
+**Diagnosis**:
+
+1. **Check network latency**:
+   ```bash
+   curl -w "\nTotal time: %{time_total}s\n" http://localhost:3000/api/health
+   ```
+
+2. **Enable Next.js debug mode**:
+   ```bash .env
+   DEBUG=*
+   ```
+
+3. **Profile database queries**:
+   ```sql
+   SET log_min_duration_statement = 100;  -- Log queries > 100ms
+   ```
+
+**Solutions**:
+
+- Enable React Query caching for API calls
+- Implement API route caching with Redis
+- Optimize PostgreSQL with indexes and materialized views
+- Use CDN for static assets
+
+## Shapefile Import Issues
+
+### Invalid Geometry Errors
+
+**Error**:
+```
+Geometry validation failed: Self-intersection at point (x, y)
+```
+
+**Diagnosis**: The uploaded shapefile contains invalid geometries.
+
+**Solutions**:
+
+1. **Auto-repair in worker**:
+   ```typescript
+   const repaired = await prisma.$queryRaw`
+     SELECT ST_MakeValid(geometry) FROM temp_import
+   `;
+   ```
+
+2. **Preprocess in QGIS**:
+   - Vector → Geometry Tools → Check Validity
+   - Vector → Geometry Tools → Fix Geometries
+
+### Missing Attributes
+
+**Error**:
+```
+Required field 'nivel4_id' not found in shapefile
+```
+
+**Solution**: Ensure shapefile DBF contains required columns:
+- `nivel2_id`
+- `nivel3_id`
+- `nivel4_id`
+
+Refer to [shapefile requirements](/guides/shapefile-import).
+
+### CRS Transform Fails
+
+**Error**:
+```
+Unsupported CRS: EPSG:32719
+```
+
+**Solution**: Include `.prj` file in ZIP or specify CRS explicitly:
+
+```typescript
+await prisma.$executeRaw`
+  SELECT ST_Transform(ST_SetSRID(geometry, 32719), 4326)
+`;
+```
+
+## Getting Help
+
+If issues persist:
+
+1. **Collect logs**:
+   ```bash
+   pm2 logs --lines 200 > smyeg-logs.txt
+   ```
+
+2. **Export PM2 info**:
+   ```bash
+   pm2 show confor-web > pm2-info.txt
+   pm2 status >> pm2-info.txt
+   ```
+
+3. **Database diagnostics**:
+   ```sql
+   SELECT version();
+   SELECT postgis_version();
+   \dt+  -- List table sizes
+   ```
+
+4. **Contact support** with:
+   - Log files
+   - PM2 configuration
+   - Error messages
+   - Steps to reproduce
+
+<Card title="Back to Monitoring" icon="arrow-left" href="/deployment/monitoring">
+  Review monitoring and health check setup
+</Card>

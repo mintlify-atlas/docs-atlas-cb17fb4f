@@ -1,0 +1,670 @@
+---
+title: Analytics & Audit Logging
+description: Dashboard metrics, comprehensive audit trail, and system monitoring for forest management operations
+icon: chart-line
+---
+
+## Overview
+
+SMyEG provides comprehensive **analytics and audit logging** capabilities for monitoring system usage, tracking data changes, and generating insights from forest management operations. The system includes dashboard metrics, detailed audit trails, and export functionality.
+
+## Dashboard Metrics
+
+### Metrics API
+
+```typescript
+// GET /api/dashboard/metrics
+export async function GET() {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
+  const [usersTotal, usersActive, pendingNotifications, auditTotal] = 
+    await Promise.all([
+      prisma.user.count({ where: { deletedAt: null } }),
+      prisma.user.count({ where: { status: "ACTIVE", deletedAt: null } }),
+      prisma.notification.count({ where: { status: "PENDING" } }),
+      prisma.auditLog.count(),
+    ]);
+
+  return ok({
+    usersTotal,
+    usersActive,
+    pendingNotifications,
+    auditTotal,
+    generatedAt: new Date().toISOString(),
+  });
+}
+```
+
+### Key Metrics
+
+<CardGroup cols={2}>
+  <Card title="User Statistics" icon="users">
+    Total users, active users, pending verifications
+  </Card>
+  <Card title="System Activity" icon="activity">
+    Login events, API calls, data modifications
+  </Card>
+  <Card title="Data Volume" icon="database">
+    Patrimony units, measurements, geometries
+  </Card>
+  <Card title="Notifications" icon="bell">
+    Pending, sent, failed notification counts
+  </Card>
+</CardGroup>
+
+## Audit Logging System
+
+### Audit Log Model
+
+```prisma
+model AuditLog {
+  id             String      @id @default(uuid())
+  organizationId String?
+  userId         String?
+  sessionId      String?
+  action         AuditAction
+  entityType     String?     // e.g., "User", "ForestPatrimonyLevel4"
+  entityId       String?
+  entityName     String?
+  oldValues      Json?       // Previous state (for UPDATE)
+  newValues      Json?       // New state (for CREATE/UPDATE)
+  changedFields  String[]    // List of modified fields
+  ipAddress      String?
+  userAgent      String?
+  requestId      String?     // Trace request across services
+  durationMs     Int?        // Operation duration
+  statusCode     Int?        // HTTP status code
+  errorMessage   String?
+  metadata       Json?       // Additional context
+  createdAt      DateTime    @default(now())
+  
+  organization   Organization?
+  user           User?
+  session        Session?
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  LOGIN_FAILED
+  PASSWORD_RESET
+  PERMISSION_CHANGE
+  EXPORT
+  VIEW
+}
+```
+
+### Audit Trail Features
+
+<CardGroup cols={2}>
+  <Card title="Complete History" icon="clock-rotate-left">
+    Track all CREATE, UPDATE, DELETE operations with before/after states
+  </Card>
+  <Card title="User Attribution" icon="user-check">
+    Record who performed each action with user and session info
+  </Card>
+  <Card title="Security Events" icon="shield">
+    Log authentication attempts, password changes, permission modifications
+  </Card>
+  <Card title="Request Tracing" icon="route">
+    Track operations across API calls with requestId correlation
+  </Card>
+</CardGroup>
+
+## Creating Audit Logs
+
+### Safe Audit Logging Helper
+
+```typescript
+// From src/app/api/forest/patrimony/route.ts
+async function safeAuditLog(data: Prisma.AuditLogUncheckedCreateInput) {
+  try {
+    await prisma.auditLog.create({ data });
+  } catch {
+    // Fail silently to not block operations
+  }
+}
+```
+
+### Audit Log Examples
+
+<Tabs>
+  <Tab title="User Creation">
+    ```typescript
+    await safeAuditLog({
+      userId: newUser.id,
+      action: "CREATE",
+      entityType: "User",
+      entityId: newUser.id,
+      newValues: {
+        email: newUser.email,
+        firstName: newUser.firstName,
+        status: newUser.status,
+      },
+    });
+    ```
+  </Tab>
+  <Tab title="Patrimony Update">
+    ```typescript
+    await safeAuditLog({
+      userId: authResult.session.user.id,
+      action: "UPDATE",
+      entityType: "ForestPatrimonyLevel4",
+      entityId: updated.id,
+      oldValues: {
+        name: current.name,
+        totalAreaHa: current.totalAreaHa,
+      },
+      newValues: {
+        name: updated.name,
+        totalAreaHa: updated.totalAreaHa,
+      },
+      changedFields: ["name", "totalAreaHa"],
+    });
+    ```
+  </Tab>
+  <Tab title="Login Event">
+    ```typescript
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        action: "LOGIN",
+        entityType: "User",
+        entityId: user.id,
+        ipAddress: req.headers.get("x-forwarded-for"),
+        userAgent: req.headers.get("user-agent"),
+      },
+    });
+    ```
+  </Tab>
+  <Tab title="Failed Login">
+    ```typescript
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        action: "LOGIN_FAILED",
+        entityType: "User",
+        entityId: user.id,
+        errorMessage: "Invalid password",
+        metadata: {
+          attemptCount: user.failedLoginAttempts + 1,
+        },
+      },
+    });
+    ```
+  </Tab>
+  <Tab title="Data Export">
+    ```typescript
+    await safeAuditLog({
+      userId: authResult.session.user.id,
+      action: "EXPORT",
+      entityType: "AuditLog",
+      metadata: {
+        format: "csv",
+        recordCount: 500,
+        filters: { action: "LOGIN" },
+      },
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Audit Log API
+
+### Query Audit Logs
+
+```typescript
+// GET /api/audit?page=1&limit=50&action=UPDATE&entityType=User
+export async function GET(req: NextRequest) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
+  const permissionError = requirePermission(
+    authResult.session.user.permissions,
+    "audit",
+    "READ"
+  );
+  if (permissionError) return permissionError;
+
+  const page = Number(req.nextUrl.searchParams.get("page") ?? 1);
+  const limit = Number(req.nextUrl.searchParams.get("limit") ?? 50);
+  const action = req.nextUrl.searchParams.get("action") ?? undefined;
+  const entityType = req.nextUrl.searchParams.get("entityType") ?? undefined;
+
+  const where = {
+    ...(action ? { action: action as AuditAction } : {}),
+    ...(entityType ? { entityType } : {}),
+  };
+
+  const [total, logs] = await Promise.all([
+    prisma.auditLog.count({ where }),
+    prisma.auditLog.findMany({
+      where,
+      skip: (page - 1) * limit,
+      take: limit,
+      orderBy: { createdAt: "desc" },
+      include: {
+        user: {
+          select: {
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    }),
+  ]);
+
+  return ok({
+    items: logs,
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    },
+  });
+}
+```
+
+### Export Audit Logs
+
+```typescript
+// POST /api/audit (Export)
+export async function POST(req: NextRequest) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
+  const permissionError = requirePermission(
+    authResult.session.user.permissions,
+    "audit",
+    "EXPORT"
+  );
+  if (permissionError) return permissionError;
+
+  const body = await req.json();
+  const exportFormat = body?.format === "json" ? "json" : "csv";
+
+  // Log the export action
+  await prisma.auditLog.create({
+    data: {
+      userId: authResult.session.user.id,
+      action: "EXPORT",
+      entityType: "AuditLog",
+      metadata: { format: exportFormat },
+    },
+  });
+
+  const logs = await prisma.auditLog.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 500, // Limit to 500 most recent
+  });
+
+  if (exportFormat === "json") {
+    return ok({ 
+      checksum: `audit-${Date.now()}`, 
+      data: logs 
+    });
+  }
+
+  // CSV export
+  const header = "id,action,entityType,entityId,userId,createdAt";
+  const rows = logs.map((log) =>
+    [
+      log.id,
+      log.action,
+      log.entityType ?? "",
+      log.entityId ?? "",
+      log.userId ?? "",
+      log.createdAt.toISOString(),
+    ].join(",")
+  );
+
+  return ok({ 
+    checksum: `audit-${Date.now()}`, 
+    csv: [header, ...rows].join("\n") 
+  });
+}
+```
+
+### Delete Audit Logs
+
+```typescript
+// DELETE /api/audit (Admin only)
+export async function DELETE(req: NextRequest) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
+  const permissionError = requirePermission(
+    authResult.session.user.permissions,
+    "audit",
+    "DELETE"
+  );
+  if (permissionError) return permissionError;
+
+  try {
+    await prisma.auditLog.deleteMany({});
+    return ok({ success: true });
+  } catch (error) {
+    return fail("No se pudieron eliminar los registros de auditoría", 500);
+  }
+}
+```
+
+## Notification System
+
+### Notification Model
+
+```prisma
+model Notification {
+  id           String              @id @default(uuid())
+  userId       String
+  title        String
+  body         String
+  type         String              // e.g., "system", "campaign", "measurement"
+  channel      NotificationChannel @default(IN_APP)
+  status       NotificationStatus  @default(PENDING)
+  data         Json?               // Additional context
+  actionUrl    String?             // CTA link
+  readAt       DateTime?
+  sentAt       DateTime?
+  scheduledFor DateTime?           // Scheduled delivery
+  expiresAt    DateTime?           // Auto-expire
+  createdAt    DateTime            @default(now())
+  
+  user         User
+}
+
+enum NotificationChannel {
+  EMAIL
+  IN_APP
+  SMS
+  PUSH
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+```
+
+### Notification Preferences
+
+```prisma
+model NotificationPreference {
+  id               String              @id @default(uuid())
+  userId           String
+  notificationType String              // e.g., "campaign_completed"
+  channel          NotificationChannel
+  isEnabled        Boolean             @default(true)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  
+  user             User
+  
+  @@unique([userId, notificationType, channel])
+}
+```
+
+**Example preferences:**
+
+```json
+[
+  {
+    "notificationType": "campaign_completed",
+    "channel": "EMAIL",
+    "isEnabled": true
+  },
+  {
+    "notificationType": "measurement_due",
+    "channel": "IN_APP",
+    "isEnabled": true
+  },
+  {
+    "notificationType": "system_maintenance",
+    "channel": "PUSH",
+    "isEnabled": false
+  }
+]
+```
+
+## Dashboard Widgets
+
+### Widget System
+
+```prisma
+model DashboardWidget {
+  id                  String                @id @default(uuid())
+  name                String
+  slug                String                @unique
+  description         String?
+  componentName       String                // React component name
+  defaultConfig       Json?
+  requiredPermissions String[]              // Required to view
+  isActive            Boolean               @default(true)
+  createdAt           DateTime              @default(now())
+  
+  userLayouts         UserDashboardLayout[]
+}
+
+model UserDashboardLayout {
+  id        String          @id @default(uuid())
+  userId    String
+  widgetId  String
+  positionX Int             @default(0)
+  positionY Int             @default(0)
+  width     Int             @default(4)
+  height    Int             @default(3)
+  config    Json?           // Widget-specific config
+  isVisible Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  
+  user      User
+  widget    DashboardWidget
+  
+  @@unique([userId, widgetId])
+}
+```
+
+### Example Dashboard Widgets
+
+<CardGroup cols={2}>
+  <Card title="User Statistics" icon="users">
+    Total users, active users, recent registrations
+  </Card>
+  <Card title="Patrimony Summary" icon="tree">
+    Total area (ha), Level 2/3/4 unit counts
+  </Card>
+  <Card title="Recent Activities" icon="clock">
+    Latest audit log entries, recent imports
+  </Card>
+  <Card title="Measurement Progress" icon="chart-bar">
+    Active campaigns, pending observations
+  </Card>
+  <Card title="Notifications" icon="bell">
+    Unread notifications, pending actions
+  </Card>
+  <Card title="System Health" icon="heart-pulse">
+    API response times, job queue status
+  </Card>
+</CardGroup>
+
+## User Profile & Settings
+
+### User Profile Model
+
+```prisma
+model UserProfile {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  bio          String?
+  jobTitle     String?
+  department   String?
+  company      String?
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  postalCode   String?
+  country      String?
+  socialLinks  Json?    // { linkedin, twitter, etc. }
+  preferences  Json?    // UI preferences, language, etc.
+  customFields Json?    // Organization-specific fields
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  user         User
+}
+```
+
+### Profile API
+
+```typescript
+// GET /api/profile
+export async function GET(req: NextRequest) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
+  const user = await prisma.user.findUnique({
+    where: { id: authResult.session.user.id },
+    include: {
+      profile: true,
+      organization: {
+        select: { id: true, name: true, logoUrl: true },
+      },
+      userRoles: {
+        include: {
+          role: {
+            select: { name: true, slug: true },
+          },
+        },
+      },
+    },
+  });
+
+  return ok({ user });
+}
+
+// PATCH /api/profile
+export async function PATCH(req: NextRequest) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
+  const body = await req.json();
+  const parsed = updateProfileSchema.safeParse(body);
+  if (!parsed.success) {
+    return fail("Datos inválidos", 400, parsed.error.flatten());
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: authResult.session.user.id },
+    data: {
+      firstName: parsed.data.firstName,
+      lastName: parsed.data.lastName,
+      displayName: parsed.data.displayName,
+      profile: {
+        upsert: {
+          create: parsed.data.profile,
+          update: parsed.data.profile,
+        },
+      },
+    },
+  });
+
+  return ok({ user: updated });
+}
+```
+
+## System Configuration
+
+Organization-specific system settings:
+
+```prisma
+model SystemConfiguration {
+  id              String        @id @default(uuid())
+  organizationId  String?
+  category        String        // e.g., "general", "features", "limits"
+  key             String        // e.g., "max_upload_size"
+  value           String?
+  configType      ConfigType    @default(STRING)
+  description     String?
+  isPublic        Boolean       @default(false)
+  isEditable      Boolean       @default(true)
+  validationRules Json?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  updatedBy       String?
+  
+  organization    Organization?
+  
+  @@unique([organizationId, category, key])
+}
+```
+
+**Example configurations:**
+
+```json
+[
+  {
+    "category": "general",
+    "key": "site_title",
+    "value": "ACME Forest Management",
+    "configType": "STRING",
+    "isPublic": true
+  },
+  {
+    "category": "limits",
+    "key": "max_upload_size_mb",
+    "value": "50",
+    "configType": "INTEGER"
+  },
+  {
+    "category": "features",
+    "key": "enable_geospatial",
+    "value": "true",
+    "configType": "BOOLEAN"
+  }
+]
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Log Everything" icon="list">
+    Capture all significant actions: CREATE, UPDATE, DELETE, LOGIN
+  </Card>
+  <Card title="Include Context" icon="circle-info">
+    Record IP address, user agent, session ID for security analysis
+  </Card>
+  <Card title="Track Changes" icon="code-compare">
+    Store `oldValues` and `newValues` for UPDATE operations
+  </Card>
+  <Card title="Fail Gracefully" icon="shield-check">
+    Use `safeAuditLog` to prevent audit failures from blocking operations
+  </Card>
+  <Card title="Retention Policy" icon="calendar-days">
+    Implement data retention rules for audit logs (e.g., 1 year)
+  </Card>
+  <Card title="Export Capability" icon="file-export">
+    Provide CSV/JSON export for compliance and analysis
+  </Card>
+</CardGroup>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock" href="/features/authentication">
+    User authentication and security events
+  </Card>
+  <Card title="Organizations" icon="building" href="/features/organizations">
+    Organization-scoped audit logs
+  </Card>
+</CardGroup>

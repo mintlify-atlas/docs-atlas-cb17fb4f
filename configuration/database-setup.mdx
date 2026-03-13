@@ -1,0 +1,413 @@
+---
+title: Database Setup
+description: PostgreSQL configuration with PostGIS extension for geospatial data
+---
+
+## Overview
+
+SMyEG uses **PostgreSQL 15+** with the **PostGIS** extension for geospatial data management. The application manages forest patrimony geometries, land use variations, and asset measurements.
+
+## Quick Start with Docker
+
+The easiest way to set up PostgreSQL is using Docker Compose:
+
+```bash
+docker compose up -d
+```
+
+This starts:
+- **PostgreSQL 15** on port `5432`
+- **Redis 7** on port `6379` (used for caching/sessions)
+
+### Docker Compose Configuration
+
+```yaml docker-compose.yml
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: app_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+
+volumes:
+  pgdata:
+  redisdata:
+```
+
+## Manual PostgreSQL Installation
+
+If you prefer to install PostgreSQL manually:
+
+### On Ubuntu/Debian
+
+```bash
+# Add PostgreSQL repository
+sudo apt install postgresql-15 postgresql-contrib-15 postgis
+
+# Start PostgreSQL
+sudo systemctl start postgresql
+sudo systemctl enable postgresql
+```
+
+### On macOS
+
+```bash
+# Using Homebrew
+brew install postgresql@15 postgis
+
+# Start PostgreSQL
+brew services start postgresql@15
+```
+
+### On Windows
+
+Download and install from [postgresql.org](https://www.postgresql.org/download/windows/), then install PostGIS from [postgis.net](https://postgis.net/install/).
+
+## Database Extensions
+
+SMyEG requires several PostgreSQL extensions for full functionality.
+
+### Required Extensions
+
+The initial migration automatically installs these extensions:
+
+| Extension | Purpose | Version |
+|-----------|---------|----------|
+| **uuid-ossp** | UUID generation functions | Built-in |
+| **pgcrypto** | Cryptographic functions | Built-in |
+| **pg_trgm** | Trigram text search and similarity | Built-in |
+| **postgis** | Geospatial data types and functions | 3.0+ |
+
+### Installation via Migration
+
+Extensions are installed automatically when running the first migration:
+
+```sql
+-- From migration: 0001_init/migration.sql
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+```
+
+```sql
+-- From migration: 20260302183000_geo_spatial_jobs/migration.sql
+CREATE EXTENSION IF NOT EXISTS "postgis";
+```
+
+### Manual Extension Installation
+
+If you need to install extensions manually:
+
+```sql
+-- Connect to your database
+psql -U postgres -d app_dev
+
+-- Install extensions
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+CREATE EXTENSION IF NOT EXISTS "postgis";
+
+-- Verify installation
+SELECT name, default_version, installed_version 
+FROM pg_available_extensions 
+WHERE name IN ('uuid-ossp', 'pgcrypto', 'pg_trgm', 'postgis');
+```
+
+## Geospatial Tables
+
+### ForestGeometryN4 Table
+
+Stores multi-polygon geometries for Level 4 patrimony units (Rodal, Parcela, etc.).
+
+```sql
+CREATE TABLE forest_geometry_n4 (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL,
+  level2_id UUID NOT NULL,
+  level3_id UUID NOT NULL,
+  level4_id UUID NOT NULL,
+  
+  -- PostGIS geometry columns (SRID 4326 = WGS84)
+  geom geometry(MultiPolygon, 4326) NOT NULL,
+  centroid geometry(Point, 4326),
+  
+  superficie_ha NUMERIC(12, 4) NOT NULL DEFAULT 0,
+  valid_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  valid_to TIMESTAMPTZ,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  import_job_id UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+### Spatial Indexes
+
+GiST indexes enable fast spatial queries:
+
+```sql
+-- GIST index for spatial operations
+CREATE INDEX idx_forest_geom_gist 
+  ON forest_geometry_n4 USING GIST (geom);
+
+-- Hierarchy and active status indexes
+CREATE INDEX idx_forest_geometry_n4_hierarchy 
+  ON forest_geometry_n4 (organization_id, level2_id, level3_id);
+
+CREATE INDEX idx_forest_geometry_n4_level4_active 
+  ON forest_geometry_n4 (level4_id, is_active);
+
+-- Unique constraint: one active geometry per Level 4 unit
+CREATE UNIQUE INDEX uq_forest_geometry_n4_active 
+  ON forest_geometry_n4 (organization_id, level4_id) 
+  WHERE is_active = TRUE;
+```
+
+## Database Triggers
+
+### Automatic Geometry Calculations
+
+Triggers automatically calculate area and centroid when geometries are inserted or updated:
+
+```sql
+CREATE OR REPLACE FUNCTION fn_calculate_forest_metrics()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Validate and ensure MultiPolygon type
+  NEW.geom := ST_Multi(ST_MakeValid(NEW.geom));
+  
+  -- Calculate centroid (point on surface)
+  NEW.centroid := ST_PointOnSurface(NEW.geom);
+  
+  -- Calculate area in hectares
+  NEW.superficie_ha := ST_Area(NEW.geom::geography) / 10000;
+  
+  -- Update timestamp
+  NEW.updated_at := NOW();
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_forest_metrics
+BEFORE INSERT OR UPDATE OF geom
+ON forest_geometry_n4
+FOR EACH ROW
+EXECUTE FUNCTION fn_calculate_forest_metrics();
+```
+
+<Info>
+  The trigger automatically:
+  - Validates and fixes invalid geometries
+  - Ensures proper MultiPolygon type
+  - Calculates centroid point
+  - Computes area in hectares from geographic coordinates
+</Info>
+
+### Timestamp Updates
+
+Automatic timestamp updates for job tables:
+
+```sql
+CREATE OR REPLACE FUNCTION fn_set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at := NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Applied to geo import jobs
+CREATE TRIGGER trg_geo_import_jobs_updated_at
+BEFORE UPDATE ON geo_import_jobs
+FOR EACH ROW
+EXECUTE FUNCTION fn_set_updated_at();
+
+-- Applied to recalc jobs
+CREATE TRIGGER trg_forest_geometry_recalc_jobs_updated_at
+BEFORE UPDATE ON forest_geometry_recalc_jobs
+FOR EACH ROW
+EXECUTE FUNCTION fn_set_updated_at();
+```
+
+## Database Schema Management
+
+### Prisma Migrations
+
+SMyEG uses Prisma for schema management. The migration history:
+
+| Migration | Description |
+|-----------|-------------|
+| `0001_init` | Initial schema with user management, roles, permissions |
+| `0002_land_use_type_add_category` | Land use type categories |
+| `20260302183000_geo_spatial_jobs` | PostGIS setup, geometry tables, triggers |
+| `20260303010507_add_patrimony_enum_options` | Patrimony type enumerations |
+| `20260303014651_level4_fsc_certificate_status` | FSC certification tracking |
+| `20260303041133_forest_geometry_n4` | Additional geometry features |
+| `20260303120000_add_level4_otro_uso` | "Other use" option for Level 4 |
+| `20260303123000_add_level4_land_use_columns` | Land use change tracking |
+| `20260308191500_land_patrimonial_variations` | Patrimonial variation management |
+| `20260308195500_geo_land_variation_jobs` | Variation job queue (split/merge) |
+| `20260308224011_contability_forestry` | Accounting and administrative costs |
+| `20260309175919_assets_measurement_smyge` | Asset measurement campaigns |
+
+### Running Migrations
+
+```bash
+# Generate Prisma client
+pnpm db:generate
+
+# Run pending migrations (development)
+pnpm db:migrate
+
+# Push schema changes without migration (development only)
+pnpm db:push
+
+# Seed initial data
+pnpm db:seed
+```
+
+### Production Migrations
+
+```bash
+# Run migrations in production
+npx prisma migrate deploy
+
+# Check migration status
+npx prisma migrate status
+```
+
+## Performance Optimization
+
+### Connection Pooling
+
+Prisma uses connection pooling by default. Configure in your `DATABASE_URL`:
+
+```bash
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/app_dev?connection_limit=10&pool_timeout=20"
+```
+
+### Query Performance
+
+The schema includes optimized indexes for common queries:
+
+```sql
+-- Job processing queries
+CREATE INDEX idx_geo_import_jobs_org_status 
+  ON geo_import_jobs (organization_id, status);
+
+CREATE INDEX idx_forest_geometry_recalc_jobs_status_run_after 
+  ON forest_geometry_recalc_jobs (status, run_after);
+
+-- Asset calculation jobs
+CREATE INDEX idx_asset_calculation_jobs_status_run_after 
+  ON asset_calculation_jobs (status, runAfter);
+
+CREATE INDEX idx_asset_calculation_jobs_org_domain_protocol 
+  ON asset_calculation_jobs (organizationId, domain, protocolType);
+```
+
+### Partitioning Considerations
+
+For large-scale deployments, consider partitioning these tables:
+
+- **audit_logs** - Partition by created_at (monthly or quarterly)
+- **asset_measurement_observations** - Partition by campaign_id or observed_at
+- **forest_geometry_n4** - Partition by organization_id (for multi-tenant)
+
+<Note>
+  Partitioning is not configured by default. Implement based on data volume and query patterns.
+</Note>
+
+## Backup and Maintenance
+
+### Backup Strategy
+
+```bash
+# Full database backup
+pg_dump -U postgres -d app_dev -F c -f backup_$(date +%Y%m%d).dump
+
+# Schema only
+pg_dump -U postgres -d app_dev --schema-only > schema_backup.sql
+
+# Specific tables
+pg_dump -U postgres -d app_dev -t forest_geometry_n4 -F c -f geometry_backup.dump
+```
+
+### Restore
+
+```bash
+# Restore full database
+pg_restore -U postgres -d app_dev backup_20260313.dump
+
+# Restore schema
+psql -U postgres -d app_dev < schema_backup.sql
+```
+
+### Maintenance Tasks
+
+```sql
+-- Analyze tables for query optimization
+ANALYZE forest_geometry_n4;
+ANALYZE geo_import_jobs;
+
+-- Vacuum to reclaim space
+VACUUM ANALYZE forest_geometry_n4;
+
+-- Reindex spatial indexes
+REINDEX INDEX idx_forest_geom_gist;
+```
+
+## Troubleshooting
+
+### PostGIS Not Available
+
+```sql
+-- Check if PostGIS is installed
+SELECT * FROM pg_available_extensions WHERE name = 'postgis';
+
+-- Install PostGIS (may require superuser)
+CREATE EXTENSION postgis;
+```
+
+### Connection Issues
+
+```bash
+# Test connection
+psql -U postgres -d app_dev -h localhost -p 5432
+
+# Check PostgreSQL is running
+sudo systemctl status postgresql
+
+# Check port availability
+netstat -an | grep 5432
+```
+
+### Migration Errors
+
+```bash
+# Reset database (development only - destroys data)
+pnpm prisma migrate reset
+
+# Resolve migration conflicts
+pnpm prisma migrate resolve --applied "20260302183000_geo_spatial_jobs"
+```
+
+## Related Documentation
+
+- [Environment Variables](/configuration/environment-variables) - Database connection configuration
+- [Workers](/configuration/workers) - Background workers that use the database

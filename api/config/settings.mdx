@@ -1,0 +1,493 @@
+---
+title: 'System Configuration'
+description: 'Manage organization-wide system settings with typed configuration values'
+---
+
+## Overview
+
+The System Configuration API manages application settings scoped by organization and category. It supports strongly-typed configuration values with validation rules and provides import/export capabilities for configuration management.
+
+## ConfigType Enum
+
+Configuration values are stored as strings but have an associated type for parsing:
+
+| Type | Description | Example Value |
+|------|-------------|---------------|
+| `STRING` | Text value | `"production"` |
+| `INTEGER` | Whole number | `"3600"` |
+| `BOOLEAN` | True/false value | `"true"` or `"false"` |
+| `JSON` | JSON object or array | `"{\"key\": \"value\"}"` |
+| `SECRET` | Encrypted sensitive data | `"***ENCRYPTED***"` |
+
+<Warning>
+`SECRET` type values should never be exposed in client-side code. The API may mask these values in responses.
+</Warning>
+
+## Data Model
+
+The `SystemConfiguration` model stores key-value settings:
+
+```prisma
+model SystemConfiguration {
+  id              String        @id @default(uuid())
+  organizationId  String?       // null = global setting
+  category        String        // e.g., "app", "email", "features"
+  key             String        // Setting identifier
+  value           String?       // Stored as string, parsed by configType
+  configType      ConfigType    @default(STRING)
+  description     String?       // Human-readable description
+  isPublic        Boolean       @default(false)  // Can be read by non-admins
+  isEditable      Boolean       @default(true)   // Can be modified via API
+  validationRules Json?         // JSON schema for value validation
+  createdAt       DateTime
+  updatedAt       DateTime
+  updatedBy       String?       // User who last modified
+}
+```
+
+### Unique Constraint
+
+Each configuration is unique by `(organizationId, category, key)`.
+
+## GET /api/config
+
+Retrieve all system configuration settings for the authenticated user's organization.
+
+### Authentication
+Requires authentication with `settings:READ` permission, or `ADMIN`/`SUPER_ADMIN` role.
+
+### Response
+
+Returns an array of configuration objects ordered by category and key.
+
+```json
+[
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "organizationId": "org-123",
+    "category": "features",
+    "key": "enable_geospatial_import",
+    "value": "true",
+    "configType": "BOOLEAN",
+    "description": "Enable shapefile import functionality",
+    "isPublic": false,
+    "isEditable": true,
+    "validationRules": null,
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-03-10T14:22:00Z",
+    "updatedBy": "user-456"
+  },
+  {
+    "id": "660e8400-e29b-41d4-a716-446655440001",
+    "organizationId": "org-123",
+    "category": "app",
+    "key": "session_timeout_seconds",
+    "value": "3600",
+    "configType": "INTEGER",
+    "description": "Session timeout in seconds",
+    "isPublic": true,
+    "isEditable": true,
+    "validationRules": { "min": 300, "max": 86400 },
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-01-01T00:00:00Z",
+    "updatedBy": null
+  },
+  {
+    "id": "770e8400-e29b-41d4-a716-446655440002",
+    "organizationId": "org-123",
+    "category": "email",
+    "key": "smtp_password",
+    "value": "***MASKED***",
+    "configType": "SECRET",
+    "description": "SMTP server password",
+    "isPublic": false,
+    "isEditable": true,
+    "validationRules": null,
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-02-15T09:30:00Z",
+    "updatedBy": "admin-user-id"
+  }
+]
+```
+
+<ResponseField name="category" type="string">
+  Configuration category for logical grouping (e.g., `app`, `features`, `email`, `integrations`)
+</ResponseField>
+
+<ResponseField name="key" type="string">
+  Unique identifier within the category
+</ResponseField>
+
+<ResponseField name="value" type="string">
+  The configuration value stored as a string. Parse according to `configType`.
+</ResponseField>
+
+<ResponseField name="configType" type="enum">
+  Type hint for parsing the value: `STRING`, `INTEGER`, `BOOLEAN`, `JSON`, or `SECRET`
+</ResponseField>
+
+<ResponseField name="isPublic" type="boolean">
+  If `true`, non-admin users can read this setting
+</ResponseField>
+
+<ResponseField name="isEditable" type="boolean">
+  If `false`, the setting cannot be modified via API (system-managed)
+</ResponseField>
+
+<ResponseField name="validationRules" type="object">
+  Optional JSON schema for validating new values before saving
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash cURL
+curl -X GET "https://api.smyeg.com/api/config" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('/api/config', {
+  headers: {
+    'Authorization': `Bearer ${token}`
+  }
+});
+const configs = await response.json();
+
+// Parse typed values
+const sessionTimeout = parseInt(
+  configs.find(c => c.key === 'session_timeout_seconds')?.value || '3600'
+);
+const featuresEnabled = configs.find(c => c.key === 'enable_geospatial_import')?.value === 'true';
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://api.smyeg.com/api/config',
+    headers={'Authorization': f'Bearer {token}'}
+)
+configs = response.json()
+
+# Parse typed values
+session_timeout = int(
+    next((c['value'] for c in configs if c['key'] == 'session_timeout_seconds'), '3600')
+)
+```
+
+</CodeGroup>
+
+## PATCH /api/config
+
+Create or update a system configuration setting.
+
+### Authentication
+Requires authentication with `settings:UPDATE` permission, or `ADMIN`/`SUPER_ADMIN` role.
+
+### Request Body
+
+<ParamField body="category" type="string" required>
+  Configuration category (e.g., `app`, `features`, `email`)
+</ParamField>
+
+<ParamField body="key" type="string" required>
+  Configuration key identifier
+</ParamField>
+
+<ParamField body="value" type="string">
+  The configuration value as a string. Must conform to `configType`.
+</ParamField>
+
+<ParamField body="configType" type="enum" required>
+  Value type: `STRING`, `INTEGER`, `BOOLEAN`, `JSON`, or `SECRET`
+</ParamField>
+
+### Validation Schema
+
+Request body is validated using `updateSystemConfigSchema`:
+
+```typescript
+{
+  category: string (min length 1),
+  key: string (min length 1),
+  value: string (optional),
+  configType: "STRING" | "INTEGER" | "BOOLEAN" | "JSON" | "SECRET"
+}
+```
+
+### Response
+
+Returns the created or updated configuration object.
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "organizationId": "org-123",
+  "category": "features",
+  "key": "enable_geospatial_import",
+  "value": "true",
+  "configType": "BOOLEAN",
+  "description": null,
+  "isPublic": false,
+  "isEditable": true,
+  "validationRules": null,
+  "createdAt": "2026-03-13T10:30:00Z",
+  "updatedAt": "2026-03-13T10:30:00Z",
+  "updatedBy": "user-456"
+}
+```
+
+### Audit Trail
+
+All configuration changes are automatically logged to the audit trail:
+
+```json
+{
+  "action": "UPDATE",
+  "entityType": "SystemConfiguration",
+  "entityId": "550e8400-e29b-41d4-a716-446655440000",
+  "newValues": {
+    "category": "features",
+    "key": "enable_geospatial_import",
+    "value": "true",
+    "configType": "BOOLEAN"
+  }
+}
+```
+
+### Example Request
+
+<CodeGroup>
+
+```bash cURL
+curl -X PATCH "https://api.smyeg.com/api/config" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "features",
+    "key": "enable_geospatial_import",
+    "value": "true",
+    "configType": "BOOLEAN"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('/api/config', {
+  method: 'PATCH',
+  headers: {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    category: 'features',
+    key: 'enable_geospatial_import',
+    value: 'true',
+    configType: 'BOOLEAN'
+  })
+});
+const config = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.patch(
+    'https://api.smyeg.com/api/config',
+    headers={
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json'
+    },
+    json={
+        'category': 'features',
+        'key': 'enable_geospatial_import',
+        'value': 'true',
+        'configType': 'BOOLEAN'
+    }
+)
+config = response.json()
+```
+
+</CodeGroup>
+
+## Configuration Import/Export
+
+### Export Format
+
+To export all configurations for backup or migration:
+
+1. **GET /api/config** - Retrieve all settings
+2. Save the JSON array to a file
+3. Filter out system-managed settings (`isEditable: false`) if needed
+
+**Example export file:**
+
+```json
+[
+  {
+    "category": "features",
+    "key": "enable_geospatial_import",
+    "value": "true",
+    "configType": "BOOLEAN",
+    "description": "Enable shapefile import functionality"
+  },
+  {
+    "category": "app",
+    "key": "session_timeout_seconds",
+    "value": "3600",
+    "configType": "INTEGER",
+    "description": "Session timeout in seconds"
+  }
+]
+```
+
+### Import Process
+
+To import configurations from a backup:
+
+1. Parse the JSON export file
+2. For each configuration, call **PATCH /api/config**
+3. Handle conflicts (existing keys will be updated)
+
+**Example import script:**
+
+```javascript
+async function importConfigs(configs) {
+  for (const config of configs) {
+    await fetch('/api/config', {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(config)
+    });
+  }
+}
+
+// Load from file and import
+const configsToImport = JSON.parse(fs.readFileSync('config-export.json'));
+await importConfigs(configsToImport);
+```
+
+<Note>
+Import operations will trigger audit log entries for each configuration change, providing a complete audit trail.
+</Note>
+
+## Common Configuration Categories
+
+### App Settings
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `session_timeout_seconds` | INTEGER | Session expiration time |
+| `max_upload_size_mb` | INTEGER | Maximum file upload size |
+| `default_language` | STRING | Default UI language code |
+| `maintenance_mode` | BOOLEAN | Enable maintenance mode |
+
+### Feature Flags
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `enable_geospatial_import` | BOOLEAN | Enable shapefile imports |
+| `enable_audit_partitioning` | BOOLEAN | Use monthly audit partitions |
+| `enable_asset_measurements` | BOOLEAN | Enable measurement campaigns |
+
+### Email Settings
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `smtp_host` | STRING | SMTP server hostname |
+| `smtp_port` | INTEGER | SMTP server port |
+| `smtp_username` | STRING | SMTP authentication username |
+| `smtp_password` | SECRET | SMTP authentication password |
+| `from_email` | STRING | Default sender email address |
+
+### Integration Settings
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `api_rate_limit` | INTEGER | Requests per minute limit |
+| `webhook_url` | STRING | Webhook endpoint URL |
+| `external_api_key` | SECRET | Third-party API key |
+| `sync_interval_minutes` | INTEGER | Background sync frequency |
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Type Safety">
+    - Always validate values client-side before submission
+    - Use `configType` to parse values correctly (e.g., `parseInt()` for INTEGER)
+    - Handle missing or invalid values gracefully with defaults
+    - Consider using TypeScript for compile-time type checking
+  </Accordion>
+
+  <Accordion title="Security">
+    - Use `SECRET` type for all sensitive values (passwords, API keys, tokens)
+    - Never log or expose SECRET values in error messages
+    - Restrict `settings:UPDATE` permission to administrators
+    - Implement IP allowlisting for configuration changes in production
+  </Accordion>
+
+  <Accordion title="Versioning">
+    - Use the audit trail to track configuration history
+    - Export configurations before major deployments
+    - Tag configuration exports with version numbers or dates
+    - Test configuration imports in staging environments first
+  </Accordion>
+
+  <Accordion title="Organization Isolation">
+    - Each organization has isolated configuration namespace
+    - Global settings have `organizationId: null`
+    - Never share SECRET configurations across organizations
+    - Use category prefixes to avoid key collisions (e.g., `org1_feature_x`)
+  </Accordion>
+</AccordionGroup>
+
+## Error Responses
+
+### Invalid Configuration Type
+
+```json
+{
+  "error": "Datos inválidos",
+  "statusCode": 400,
+  "details": {
+    "fieldErrors": {
+      "configType": ["Invalid enum value"]
+    }
+  }
+}
+```
+
+### Missing Required Fields
+
+```json
+{
+  "error": "Datos inválidos",
+  "statusCode": 400,
+  "details": {
+    "fieldErrors": {
+      "category": ["Required"],
+      "key": ["Required"]
+    }
+  }
+}
+```
+
+### Insufficient Permissions
+
+```json
+{
+  "error": "Forbidden",
+  "statusCode": 403,
+  "message": "You do not have permission to update settings"
+}
+```
+
+## Related Endpoints
+
+- [Audit Logs](/api/audit/logs) - View configuration change history
+- [Users](/api/users) - Manage user who can modify settings
+- [Roles & Permissions](/api/roles) - Configure `settings:READ` and `settings:UPDATE` permissions

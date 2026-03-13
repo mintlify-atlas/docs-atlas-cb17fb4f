@@ -1,0 +1,798 @@
+---
+title: 'Forest Patrimony Level 4'
+description: 'Manage forest stands, plots, and management units with geospatial data'
+---
+
+## Overview
+
+ForestPatrimonyLevel4 represents the operational units within the forest patrimony hierarchy - stands (RODAL), plots (PARCELA), enumeration units, management units (UNIDAD_DE_MANEJO), smallholdings (CONUCO), or other land uses (OTRO_USO).
+
+<Info>
+  Level 4 units are the primary operational level where:
+  - **Geospatial data** is stored (polygons with coordinates)
+  - **Land use** is tracked and monitored
+  - **Biological assets** (plantations) are registered
+  - **Patrimonial variations** are recorded
+</Info>
+
+## Hierarchy
+
+```
+ForestPatrimonyLevel3 (Parent)
+└── ForestPatrimonyLevel4 ← Current Level (with geometry)
+    ├── ForestGeometryN4 (MultiPolygon geometry)
+    ├── ForestPatrimonyLevel5 (Child plots/samples)
+    └── ForestBiologicalAssetLevel6 (Plantations)
+```
+
+## Enum: PatrimonyLevel4Type
+
+Supported level 4 types:
+
+| Value | Description |
+|-------|-------------|
+| `RODAL` | Stand |
+| `PARCELA` | Plot |
+| `ENUMERATION` | Enumeration unit |
+| `UNIDAD_DE_MANEJO` | Management unit |
+| `CONUCO` | Smallholding/Garden plot |
+| `OTRO_USO` | Other use |
+
+## Enum: FscCertificateStatus
+
+FSC certification status:
+
+| Value | Description |
+|-------|-------------|
+| `SI` | FSC certified |
+| `NO` | Not FSC certified |
+
+## Endpoints
+
+### List Level 4 Units
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.smyeg.com/api/forest/patrimony?level=4&parentId=uuid-level3&page=1&limit=25" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch(
+  'https://api.smyeg.com/api/forest/patrimony?level=4&parentId=uuid-level3',
+  {
+    method: 'GET',
+    headers: {
+      'Authorization': 'Bearer YOUR_TOKEN'
+    }
+  }
+);
+const data = await response.json();
+```
+</CodeGroup>
+
+#### Query Parameters
+
+<ParamField query="level" type="string" required>
+  Must be `"4"` for Level 4 units
+</ParamField>
+
+<ParamField query="parentId" type="string">
+  Filter by Level 3 parent ID (UUID)
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number for pagination
+</ParamField>
+
+<ParamField query="limit" type="integer" default="25">
+  Number of records per page (max 100)
+</ParamField>
+
+<ParamField query="search" type="string">
+  Search by code or name (case-insensitive)
+</ParamField>
+
+#### Response
+
+<ResponseField name="items" type="array">
+  Array of Level 4 units
+  
+  <Expandable title="Level 4 Unit Object">
+    <ResponseField name="id" type="string">
+      Unique identifier (UUID)
+    </ResponseField>
+    
+    <ResponseField name="level3Id" type="string">
+      Parent Level 3 unit ID
+    </ResponseField>
+    
+    <ResponseField name="code" type="string">
+      Unique code within Level 3 parent (max 80 chars)
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Unit name (max 255 chars)
+    </ResponseField>
+    
+    <ResponseField name="type" type="enum">
+      One of: `RODAL`, `PARCELA`, `ENUMERATION`, `UNIDAD_DE_MANEJO`, `CONUCO`, `OTRO_USO`
+    </ResponseField>
+    
+    <ResponseField name="fscCertificateStatus" type="enum">
+      FSC certification: `SI` or `NO`
+    </ResponseField>
+    
+    <ResponseField name="currentLandUseName" type="string" optional>
+      Current land use (from LandUseType catalog)
+    </ResponseField>
+    
+    <ResponseField name="previousLandUseName" type="string" optional>
+      Previous land use
+    </ResponseField>
+    
+    <ResponseField name="landUseChangeDate" type="datetime" optional>
+      Date of land use change
+    </ResponseField>
+    
+    <ResponseField name="totalAreaHa" type="decimal">
+      Total area in hectares (calculated from geometry)
+    </ResponseField>
+    
+    <ResponseField name="plantableAreaHa" type="decimal" optional>
+      Plantable area in hectares
+    </ResponseField>
+    
+    <ResponseField name="rotationPhase" type="string" optional>
+      Rotation phase (max 120 chars)
+    </ResponseField>
+    
+    <ResponseField name="previousUse" type="string" optional>
+      Previous use description
+    </ResponseField>
+    
+    <ResponseField name="centroidLatitude" type="decimal" optional>
+      Centroid latitude (calculated from geometry)
+    </ResponseField>
+    
+    <ResponseField name="centroidLongitude" type="decimal" optional>
+      Centroid longitude (calculated from geometry)
+    </ResponseField>
+    
+    <ResponseField name="lastInfoDate" type="datetime" optional>
+      Last information update date
+    </ResponseField>
+    
+    <ResponseField name="isActive" type="boolean">
+      Whether the unit is active
+    </ResponseField>
+    
+    <ResponseField name="createdAt" type="datetime">
+      Creation timestamp
+    </ResponseField>
+    
+    <ResponseField name="updatedAt" type="datetime">
+      Last update timestamp
+    </ResponseField>
+    
+    <ResponseField name="level3" type="object">
+      Parent Level 3 information
+      <Expandable title="level3 object">
+        <ResponseField name="id" type="string">
+          Level 3 unit ID
+        </ResponseField>
+        <ResponseField name="code" type="string">
+          Level 3 unit code
+        </ResponseField>
+        <ResponseField name="name" type="string">
+          Level 3 unit name
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="_count" type="object">
+      Child record counts
+      <Expandable title="_count object">
+        <ResponseField name="level6Assets" type="integer">
+          Number of biological assets (plantations) in this unit
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="pagination" type="object">
+  Pagination metadata (same structure as Level 2)
+</ResponseField>
+
+### Create Level 4 Unit (Tabular)
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.smyeg.com/api/forest/patrimony" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "level": "4",
+    "data": {
+      "level3Id": "uuid-of-level3",
+      "code": "RODAL-001",
+      "name": "Rodal Eucalipto",
+      "type": "RODAL",
+      "fscCertificateStatus": "SI",
+      "currentLandUseName": "BOSQUE",
+      "totalAreaHa": 15.50,
+      "isActive": true
+    }
+  }'
+```
+</CodeGroup>
+
+<Note>
+  This endpoint creates the Level 4 unit without geometry. To add geometry, use the [Create with Geometry](#create-level-4-unit-with-geometry) endpoint or [Import Shapefile](#import-geometries-from-shapefile).
+</Note>
+
+### Create Level 4 Unit with Geometry
+
+<Info>
+  This endpoint is designed for **GIS applications** and map interfaces. It creates or updates a Level 4 unit with a polygon geometry and validates against overlaps.
+</Info>
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.smyeg.com/api/forest/geo/level4" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "level2Id": "uuid-of-level2",
+    "level3Id": "uuid-of-level3",
+    "code": "RODAL-001",
+    "name": "Rodal Eucalipto Norte",
+    "type": "RODAL",
+    "fscCertificateStatus": "SI",
+    "currentLandUseName": "BOSQUE",
+    "previousLandUseName": "NO BOSQUE",
+    "rotationPhase": "Fase 1",
+    "polygon": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [-66.123, 10.456],
+          [-66.120, 10.456],
+          [-66.120, 10.453],
+          [-66.123, 10.453],
+          [-66.123, 10.456]
+        ]
+      ]
+    }
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.smyeg.com/api/forest/geo/level4', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    level2Id: 'uuid-of-level2',
+    level3Id: 'uuid-of-level3',
+    code: 'RODAL-001',
+    name: 'Rodal Eucalipto Norte',
+    type: 'RODAL',
+    fscCertificateStatus: 'SI',
+    currentLandUseName: 'BOSQUE',
+    previousLandUseName: 'NO BOSQUE',
+    polygon: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [-66.123, 10.456],
+          [-66.120, 10.456],
+          [-66.120, 10.453],
+          [-66.123, 10.453],
+          [-66.123, 10.456]
+        ]
+      ]
+    }
+  })
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+#### Request Body
+
+<ParamField body="level2Id" type="string" required>
+  UUID of the Level 2 parent (for hierarchy validation)
+</ParamField>
+
+<ParamField body="level3Id" type="string" required>
+  UUID of the Level 3 parent
+</ParamField>
+
+<ParamField body="code" type="string" required>
+  Unique code within Level 3 parent (max 80 chars)
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Unit name (max 255 chars)
+</ParamField>
+
+<ParamField body="type" type="enum" required>
+  One of: `RODAL`, `PARCELA`, `ENUMERATION`, `UNIDAD_DE_MANEJO`, `CONUCO`, `OTRO_USO`
+</ParamField>
+
+<ParamField body="fscCertificateStatus" type="enum" required>
+  FSC certification: `SI` or `NO`
+</ParamField>
+
+<ParamField body="currentLandUseName" type="string" required>
+  Current land use (must exist in LandUseType catalog)
+</ParamField>
+
+<ParamField body="previousLandUseName" type="string" optional>
+  Previous land use (for patrimonial variation tracking)
+</ParamField>
+
+<ParamField body="rotationPhase" type="string" optional>
+  Rotation phase description
+</ParamField>
+
+<ParamField body="previousUse" type="string" optional>
+  Previous use description
+</ParamField>
+
+<ParamField body="polygon" type="object" required>
+  GeoJSON geometry object
+  <Expandable title="polygon properties">
+    <ParamField body="type" type="enum" required>
+      Must be `"Polygon"` or `"MultiPolygon"`
+    </ParamField>
+    <ParamField body="coordinates" type="array" required>
+      GeoJSON coordinate arrays (WGS84/EPSG:4326)
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+#### Automatic Processing
+
+When creating a Level 4 unit with geometry, the system automatically:
+
+1. **Validates land use** against the LandUseType catalog
+2. **Checks for overlaps** with other active Level 4 geometries
+3. **Converts geometry** to PostGIS MultiPolygon (SRID 4326)
+4. **Calculates metrics** (area in hectares, centroid coordinates)
+5. **Deactivates old geometries** if updating an existing Level 4
+6. **Creates a patrimonial variation record** for accounting
+7. **Enqueues a recalc job** to update parent aggregations
+
+<Warning>
+  If the polygon overlaps with another active Level 4 geometry, the request will fail with an error identifying the conflicting unit.
+</Warning>
+
+#### Response
+
+Returns the created Level 4 unit object with HTTP status 201.
+
+### Get Level 4 Unit with Geometry
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.smyeg.com/api/forest/geo/level4?id=uuid-of-level4" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+#### Response
+
+<ResponseField name="id" type="string">
+  Level 4 unit ID
+</ResponseField>
+
+<ResponseField name="level2Id" type="string">
+  Level 2 parent ID
+</ResponseField>
+
+<ResponseField name="level3Id" type="string">
+  Level 3 parent ID
+</ResponseField>
+
+<ResponseField name="code" type="string">
+  Unit code
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Unit name
+</ResponseField>
+
+<ResponseField name="type" type="enum">
+  Level 4 type
+</ResponseField>
+
+<ResponseField name="fscCertificateStatus" type="enum">
+  FSC certification status
+</ResponseField>
+
+<ResponseField name="currentLandUseName" type="string">
+  Current land use
+</ResponseField>
+
+<ResponseField name="previousLandUseName" type="string">
+  Previous land use
+</ResponseField>
+
+<ResponseField name="rotationPhase" type="string">
+  Rotation phase
+</ResponseField>
+
+<ResponseField name="previousUse" type="string">
+  Previous use
+</ResponseField>
+
+<ResponseField name="totalAreaHa" type="decimal">
+  Total area in hectares (calculated from geometry)
+</ResponseField>
+
+<ResponseField name="geometry" type="object">
+  GeoJSON geometry object (MultiPolygon format)
+  <Expandable title="geometry structure">
+    <ResponseField name="type" type="string">
+      Always `"MultiPolygon"`
+    </ResponseField>
+    <ResponseField name="coordinates" type="array">
+      Array of polygon coordinate arrays
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Update Level 4 Unit with Geometry
+
+<CodeGroup>
+```bash cURL
+curl -X PATCH "https://api.smyeg.com/api/forest/geo/level4" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "level4Id": "uuid-here",
+    "name": "Rodal Eucalipto Norte Actualizado",
+    "polygon": {
+      "type": "Polygon",
+      "coordinates": [...]
+    }
+  }'
+```
+</CodeGroup>
+
+<Info>
+  All fields except `level4Id` are optional. Include only the fields you want to update.
+</Info>
+
+### Delete Level 4 Unit
+
+<Warning>
+  Deleting a Level 4 unit marks it as inactive and deactivates its geometry. This is a **soft delete** to preserve historical records.
+</Warning>
+
+<CodeGroup>
+```bash cURL (Tabular)
+curl -X DELETE "https://api.smyeg.com/api/forest/patrimony" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "level": "4",
+    "id": "uuid-here"
+  }'
+```
+
+```bash cURL (Geospatial)
+curl -X DELETE "https://api.smyeg.com/api/forest/geo/level4" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "level4Id": "uuid-here"
+  }'
+```
+</CodeGroup>
+
+## Import Level 4 Units
+
+### Bulk Import from CSV/Excel (Tabular)
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.smyeg.com/api/forest/patrimony/import" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "file=@patrimony_level4.xlsx" \
+  -F "level=4" \
+  -F "parentId=uuid-of-level3"
+```
+</CodeGroup>
+
+<Warning>
+  The `parentId` parameter is **required** when importing Level 4 units. All imported units will be assigned to this Level 3 parent.
+</Warning>
+
+#### Required Columns
+
+| Column | Type | Required | Description |
+|--------|------|----------|-------------|
+| code | string | Yes | Unique unit code (within parent) |
+| name | string | Yes | Unit name |
+| type | enum | Yes | Level 4 type |
+| totalAreaHa | decimal | Yes | Total area in hectares |
+| fscCertificateStatus | enum | Yes | FSC certification (SI/NO) |
+| isActive | boolean | No | Active status (default: true) |
+
+### Import Geometries from Shapefile
+
+<Info>
+  This endpoint imports **Level 4 geometries** from a shapefile (ZIP format) and automatically:
+  - Creates or updates Level 4 units
+  - Calculates areas and centroids
+  - Validates land use types
+  - Creates patrimonial variation records
+  - Updates land use surface totals
+</Info>
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.smyeg.com/api/forest/geo/import" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "file=@nivel4_geometrias.zip" \
+  -F "variationDate=2024-03-13" \
+  -F "variationNotes=Actualización masiva desde GIS"
+```
+</CodeGroup>
+
+#### Form Data
+
+<ParamField formData="file" type="file" required>
+  ZIP file containing shapefile components (.shp, .shx, .dbf, .prj)
+</ParamField>
+
+<ParamField formData="variationDate" type="date" optional>
+  Default date for patrimonial variations (ISO format: YYYY-MM-DD)
+</ParamField>
+
+<ParamField formData="variationNotes" type="string" optional>
+  Default notes for patrimonial variations
+</ParamField>
+
+#### Shapefile Attribute Requirements
+
+The shapefile must include these attribute fields (case-insensitive):
+
+| Attribute | Alternatives | Required | Description |
+|-----------|--------------|----------|-------------|
+| nivel2 | nivel_2, cod_n2, n2 | Yes | Level 2 code |
+| nivel3 | nivel_3, cod_n3, n3 | Yes | Level 3 code |
+| nivel4 | nivel_4, cod_n4, n4 | Yes | Level 4 code |
+| usoactual | uso_actual, currentlandusename | No | Current land use name |
+| usoanterior | uso_anterior, previouslandusename | No | Previous land use name |
+| fechavariacion | fecha_variacion, variationdate | No | Variation date (overrides form parameter) |
+| observaciones | observacion, notas, variationnotes | No | Variation notes (overrides form parameter) |
+
+#### Import Process
+
+The import runs asynchronously:
+
+1. **PENDING**: Job created, file uploaded
+2. **EXTRACTING**: Reading shapefile from ZIP
+3. **VALIDATING**: Checking required fields and structure
+4. **PROCESSING**: Processing each feature:
+   - Validates hierarchy (Level 2 → Level 3 → Level 4)
+   - Validates land use names against catalog
+   - Converts Polygon/MultiPolygon to PostGIS format
+   - Deactivates old geometries
+   - Inserts new geometry version
+   - Updates Level 4 metrics (area, centroid)
+   - Creates patrimonial variation record
+5. **COMPLETED**: All features processed successfully
+6. **FAILED**: Import failed with error message
+
+#### Response
+
+<ResponseField name="jobId" type="string">
+  Import job ID (UUID)
+</ResponseField>
+
+<ResponseField name="status" type="enum">
+  Initial status: `PENDING`
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message
+</ResponseField>
+
+<Note>
+  HTTP status 202 (Accepted) indicates the job was queued. Use the jobId to check progress via `GET /api/forest/geo/import/{jobId}`.
+</Note>
+
+### Check Import Job Status
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.smyeg.com/api/forest/geo/import/job-uuid-here" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+#### Response
+
+<ResponseField name="id" type="string">
+  Job ID
+</ResponseField>
+
+<ResponseField name="organizationId" type="string">
+  Organization ID
+</ResponseField>
+
+<ResponseField name="status" type="enum">
+  One of: `PENDING`, `EXTRACTING`, `VALIDATING`, `PROCESSING`, `COMPLETED`, `FAILED`
+</ResponseField>
+
+<ResponseField name="fileName" type="string">
+  Original filename
+</ResponseField>
+
+<ResponseField name="totalRecords" type="integer">
+  Total features in shapefile
+</ResponseField>
+
+<ResponseField name="processedRecords" type="integer">
+  Successfully processed features
+</ResponseField>
+
+<ResponseField name="failedRecords" type="integer">
+  Failed features
+</ResponseField>
+
+<ResponseField name="errorMessage" type="string" optional>
+  Error message if status is FAILED
+</ResponseField>
+
+<ResponseField name="startedAt" type="datetime" optional>
+  Job start timestamp
+</ResponseField>
+
+<ResponseField name="completedAt" type="datetime" optional>
+  Job completion timestamp
+</ResponseField>
+
+<ResponseField name="items" type="array" optional>
+  Array of import items with processing details
+  <Expandable title="Import Item">
+    <ResponseField name="featureIndex" type="integer">
+      Feature index in shapefile (0-based)
+    </ResponseField>
+    <ResponseField name="status" type="enum">
+      `PROCESSED` or `FAILED`
+    </ResponseField>
+    <ResponseField name="level2Code" type="string">
+      Level 2 code from attributes
+    </ResponseField>
+    <ResponseField name="level3Code" type="string">
+      Level 3 code from attributes
+    </ResponseField>
+    <ResponseField name="level4Code" type="string">
+      Level 4 code from attributes
+    </ResponseField>
+    <ResponseField name="message" type="string" optional>
+      Error message if failed
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Export Level 4 Units
+
+### Export to CSV/Excel
+
+<CodeGroup>
+```bash cURL (CSV)
+curl -X GET "https://api.smyeg.com/api/forest/patrimony/export?level=4&parentId=uuid-level3&format=csv" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -o patrimony_level4.csv
+```
+
+```bash cURL (Excel)
+curl -X GET "https://api.smyeg.com/api/forest/patrimony/export?level=4&parentId=uuid-level3&format=xlsx" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -o patrimony_level4.xlsx
+```
+</CodeGroup>
+
+<Warning>
+  The `parentId` parameter is **required** when exporting Level 4 units.
+</Warning>
+
+## Geospatial Data
+
+### Geometry Versioning
+
+Level 4 geometries are versioned in the `forest_geometry_n4` table:
+
+- Each geometry update creates a **new version**
+- Old versions are marked as `isActive = false` and get a `validTo` timestamp
+- Only one geometry per Level 4 unit can be active at a time
+- Historical geometries are preserved for audit trail
+
+### Geometry Format
+
+- **Storage**: PostGIS MultiPolygon (SRID 4326)
+- **API Input**: GeoJSON Polygon or MultiPolygon
+- **API Output**: GeoJSON MultiPolygon
+- **Coordinate System**: WGS84 (EPSG:4326)
+
+### Calculated Fields
+
+When a geometry is added or updated:
+
+- `totalAreaHa` - Calculated from ST_Area in hectares
+- `centroidLatitude` - Y coordinate of ST_Centroid
+- `centroidLongitude` - X coordinate of ST_Centroid
+- `superficieHa` - Stored in geometry record (12,4 precision)
+
+## Patrimonial Variations
+
+When land use changes on a Level 4 unit, the system automatically creates a `LandPatrimonialVariation` record for accounting purposes:
+
+<ResponseField name="organizationId" type="string">
+  Organization ID
+</ResponseField>
+
+<ResponseField name="level4Id" type="string">
+  Level 4 unit ID
+</ResponseField>
+
+<ResponseField name="previousLandUseName" type="string">
+  Previous land use
+</ResponseField>
+
+<ResponseField name="newLandUseName" type="string">
+  New land use
+</ResponseField>
+
+<ResponseField name="affectedAreaHa" type="decimal">
+  Affected area in hectares
+</ResponseField>
+
+<ResponseField name="kind" type="enum">
+  Variation kind: `INCREMENTO`, `DECREMENTO`, `SIN_CAMBIO`
+</ResponseField>
+
+<ResponseField name="status" type="enum">
+  Status: `PENDIENTE`, `PROCESADA`, `ANULADA`
+</ResponseField>
+
+<ResponseField name="variationDate" type="datetime">
+  Date of variation
+</ResponseField>
+
+<ResponseField name="notes" type="string">
+  Variation notes
+</ResponseField>
+
+## Permissions
+
+| Action | Permission Required |
+|--------|--------------------|
+| List units | `forest-patrimony:READ` |
+| Create unit | `forest-patrimony:CREATE` |
+| Update unit | `forest-patrimony:UPDATE` |
+| Delete unit | `forest-patrimony:DELETE` |
+| Import tabular | `forest-patrimony:CREATE` |
+| Import shapefile | `forest-patrimony:CREATE` or `forest-patrimony:UPDATE` |
+| Export units | `forest-patrimony:READ` |
+
+<Note>
+  Users can only access Level 4 units whose hierarchy belongs to their organization, unless they have SUPER_ADMIN role.
+</Note>
+
+## Related
+
+- [Forest Patrimony Level 3](/api/forest/level3) - Parent compartments and zones
+- [Forest Biological Assets](/features/forest-patrimony) - Plantation data (Level 6)
+- [Land Use Types](/features/geospatial-data) - Land use catalog
+- [Patrimonial Variations](/guides/land-accounting) - Land accounting records

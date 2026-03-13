@@ -1,0 +1,639 @@
+---
+title: Geospatial Data
+description: Shapefile import, geospatial processing, and geometry management for forest patrimony units with PostGIS integration
+icon: map
+---
+
+## Overview
+
+SMyEG provides comprehensive **geospatial data management** for Level 4 forest patrimony units, including shapefile import, geometry processing with PostGIS, and interactive map visualization. The system maintains versioned geometry data and supports complex GIS operations like split, merge, and land use change tracking.
+
+## Geospatial Architecture
+
+<CardGroup cols={2}>
+  <Card title="PostGIS Integration" icon="database">
+    PostgreSQL with PostGIS extension for spatial queries and operations
+  </Card>
+  <Card title="Geometry Versioning" icon="clock-rotate-left">
+    Track historical geometries with `valid_from` and `valid_to` timestamps
+  </Card>
+  <Card title="Shapefile Import" icon="file-arrow-up">
+    Async job-based import with validation and error tracking
+  </Card>
+  <Card title="Interactive Maps" icon="map-location-dot">
+    Leaflet-based map viewer with drawing tools and layer management
+  </Card>
+</CardGroup>
+
+## Geometry Storage Model
+
+### ForestGeometryN4 Schema
+
+```prisma
+model ForestGeometryN4 {
+  id             String                 @id @default(uuid())
+  organizationId String                 @map("organization_id")
+  level2Id       String                 @map("level2_id")
+  level3Id       String                 @map("level3_id")
+  level4Id       String                 @map("level4_id")
+  
+  // PostGIS geometry columns
+  geom           Unsupported("geometry(MultiPolygon, 4326)")
+  centroid       Unsupported("geometry(Point, 4326)")
+  superficieHa   Decimal                @default(0) @db.Decimal(12, 4)
+  
+  // Temporal versioning
+  validFrom      DateTime               @default(now())
+  validTo        DateTime?
+  isActive       Boolean                @default(true)
+  
+  // Import tracking
+  importJobId    String?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  
+  level4         ForestPatrimonyLevel4
+  importJob      GeoImportJob?
+  
+  @@map("forest_geometry_n4")
+}
+```
+
+<Note>
+  Geometries use **SRID 4326** (WGS 84) coordinate reference system and are stored as **MultiPolygon** types to support complex shapes.
+</Note>
+
+### Geometry Versioning
+
+The system maintains temporal versioning:
+
+```sql
+-- Active geometry
+SELECT * FROM forest_geometry_n4
+WHERE level4_id = '...' AND is_active = TRUE;
+
+-- Historical geometries
+SELECT * FROM forest_geometry_n4
+WHERE level4_id = '...' AND is_active = FALSE
+ORDER BY valid_to DESC;
+```
+
+**Key fields:**
+- `validFrom`: When this geometry version became active
+- `validTo`: When this geometry version was superseded (NULL for current)
+- `isActive`: Only one geometry per Level 4 can be active at a time
+
+## Shapefile Import System
+
+### Import Job Model
+
+```prisma
+model GeoImportJob {
+  id               String             @id @default(uuid())
+  organizationId   String
+  status           GeoImportJobStatus @default(PENDING)
+  fileName         String
+  storagePath      String
+  totalRecords     Int                @default(0)
+  processedRecords Int                @default(0)
+  failedRecords    Int                @default(0)
+  metadata         Json?
+  errorMessage     String?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdById      String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  
+  items            GeoImportJobItem[]
+  geometries       ForestGeometryN4[]
+  
+  @@map("geo_import_jobs")
+}
+
+enum GeoImportJobStatus {
+  PENDING
+  EXTRACTING
+  VALIDATING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+```
+
+### Import Item Tracking
+
+```prisma
+model GeoImportJobItem {
+  id            String              @id @default(uuid())
+  jobId         String
+  featureIndex  Int                 // Position in shapefile
+  status        GeoImportItemStatus
+  level2Code    String?
+  level3Code    String?
+  level4Code    String?
+  message       String?             // Error or success message
+  rawProperties Json?               // Original shapefile attributes
+  createdAt     DateTime            @default(now())
+  
+  job           GeoImportJob
+  
+  @@map("geo_import_job_items")
+}
+
+enum GeoImportItemStatus {
+  PROCESSED
+  FAILED
+}
+```
+
+### Import Flow
+
+<Steps>
+  <Step title="File Upload">
+    User uploads shapefile (`.shp`, `.shx`, `.dbf`, `.prj`) via `/api/forest/geo/import`
+  </Step>
+  <Step title="Job Creation">
+    System creates `GeoImportJob` with status PENDING and returns job ID
+  </Step>
+  <Step title="Async Processing">
+    Worker endpoint `/api/forest/geo/import/worker` processes the job:
+    - **EXTRACTING**: Read shapefile features
+    - **VALIDATING**: Check required fields and geometry validity
+    - **PROCESSING**: Insert geometries into PostGIS
+  </Step>
+  <Step title="Status Polling">
+    Client polls `/api/forest/geo/import/[jobId]` for progress updates
+  </Step>
+  <Step title="Completion">
+    Job status becomes COMPLETED or FAILED, geometries are active in the map
+  </Step>
+</Steps>
+
+### Import API Endpoints
+
+```typescript
+// POST /api/forest/geo/import
+export async function POST(req: NextRequest) {
+  const formData = await req.formData();
+  const file = formData.get("file") as File;
+  const variationDate = formData.get("variationDate") as string;
+  const variationNotes = formData.get("variationNotes") as string;
+  
+  // Create import job
+  const job = await prisma.geoImportJob.create({
+    data: {
+      organizationId,
+      fileName: file.name,
+      storagePath: savedPath,
+      status: "PENDING",
+      metadata: {
+        variationDate,
+        variationNotes,
+      },
+    },
+  });
+  
+  return ok({ jobId: job.id }, 201);
+}
+
+// GET /api/forest/geo/import/[jobId]
+export async function GET(
+  req: NextRequest,
+  { params }: { params: { jobId: string } }
+) {
+  const job = await prisma.geoImportJob.findUnique({
+    where: { id: params.jobId },
+    include: {
+      items: {
+        orderBy: { featureIndex: "asc" },
+        take: 100, // First 100 items for error preview
+      },
+    },
+  });
+  
+  return ok({ job });
+}
+```
+
+## Interactive Map Viewer
+
+### GeoDashboardMap Component
+
+The main map interface is implemented in `src/components/GeoDashboardMap.tsx`:
+
+```typescript
+export function GeoDashboardMap() {
+  const [layers, setLayers] = useState<MapLayer[]>([]);
+  const [selectedBasemap, setSelectedBasemap] = useState<BasemapKey>("osm");
+  const [editMode, setEditMode] = useState<EditMode>("none");
+  const [drawPoints, setDrawPoints] = useState<PointerCoords[]>([]);
+  
+  // Load Level 4 geometries
+  const loadLayer = useCallback(async () => {
+    const response = await fetch(
+      `/api/forest/geo/layers/nivel4?bbox=${WORLD_BBOX}`
+    );
+    const payload = await response.json();
+    
+    if (payload.success && payload.data) {
+      setLayers([createLayer("Rodales activos (Nivel 4)", payload.data)]);
+    }
+  }, []);
+  
+  return (
+    <MapContainer center={[8, -66]} zoom={5}>
+      <TileLayer url={BASEMAPS[selectedBasemap].url} />
+      {layers.map(layer => (
+        <GeoJSON key={layer.id} data={layer.data} />
+      ))}
+      <ScaleControl position="bottomleft" />
+    </MapContainer>
+  );
+}
+```
+
+### Basemap Options
+
+```typescript
+type BasemapKey = "osm" | "googleSatellite" | "topographic" | "grayCanvas" | "nationalGeographic";
+
+const BASEMAPS: Record<BasemapKey, BasemapOption> = {
+  osm: {
+    label: "Openstreetmap",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+  },
+  googleSatellite: {
+    label: "Google Satellite",
+    url: "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+  },
+  topographic: {
+    label: "Topografico",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+  },
+};
+```
+
+### Layer Styling
+
+Layers support two styling modes:
+
+**1. Surface Range Styling** (color by area):
+
+```typescript
+function colorForSurface(surfaceHa: number) {
+  if (surfaceHa < 10) return "#34d399";  // Green
+  if (surfaceHa < 50) return "#facc15";  // Yellow
+  if (surfaceHa < 150) return "#f97316"; // Orange
+  return "#ef4444";                      // Red
+}
+```
+
+**2. Single Color Mode**:
+
+```typescript
+layer.styleMode = "single";
+layer.color = "#2563eb"; // Blue
+```
+
+## GIS Drawing Tools
+
+### Edit Modes
+
+```typescript
+type EditMode = "none" | "distance" | "area" | "split" | "createLevel4";
+```
+
+<Tabs>
+  <Tab title="Distance Measurement">
+    Click multiple points to measure distances:
+    ```typescript
+    const drawDistanceMeters = useMemo(() => {
+      if (drawPoints.length < 2) return 0;
+      let total = 0;
+      for (let i = 1; i < drawPoints.length; i++) {
+        total += haversineDistanceMeters(drawPoints[i - 1], drawPoints[i]);
+      }
+      return total;
+    }, [drawPoints]);
+    ```
+  </Tab>
+  <Tab title="Area Measurement">
+    Draw a polygon to calculate area:
+    ```typescript
+    const drawAreaM2 = useMemo(() => {
+      if (drawPoints.length < 3) return 0;
+      const ring = drawPoints.map(p => [p.lng, p.lat]);
+      const polygon = turfPolygon([ring]);
+      return turfArea(polygon);
+    }, [drawPoints]);
+    ```
+  </Tab>
+  <Tab title="Split Level 4">
+    Draw a cutting line to split an existing Level 4 unit into two new units
+  </Tab>
+  <Tab title="Create Level 4">
+    Draw a new polygon to create a Level 4 unit from scratch
+  </Tab>
+</Tabs>
+
+### Haversine Distance Calculation
+
+```typescript
+function haversineDistanceMeters(a: PointerCoords, b: PointerCoords) {
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const earthRadiusMeters = 6371000;
+
+  const lat1 = toRadians(a.lat);
+  const lat2 = toRadians(b.lat);
+  const deltaLat = toRadians(b.lat - a.lat);
+  const deltaLng = toRadians(b.lng - a.lng);
+
+  const h = Math.sin(deltaLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) ** 2;
+
+  return 2 * earthRadiusMeters * Math.asin(Math.sqrt(h));
+}
+```
+
+## Geometry Operations
+
+### Split Operation
+
+Split a Level 4 unit into two new units:
+
+```typescript
+// POST /api/forest/geo/operations (type: SPLIT)
+const payload = {
+  operationType: "SPLIT",
+  sourceLevel4Id: "abc-123",
+  cuttingLine: {
+    type: "LineString",
+    coordinates: [[lng1, lat1], [lng2, lat2]],
+  },
+  unitA: {
+    code: "ROD-001-A",
+    name: "Rodal 001 A",
+    type: "RODAL",
+    currentLandUseName: "Bosque Productivo",
+  },
+  unitB: {
+    code: "ROD-001-B",
+    name: "Rodal 001 B",
+    type: "RODAL",
+    currentLandUseName: "Bosque Productivo",
+  },
+  variationDate: "2024-01-15",
+  notes: "División por diferencia de especies",
+};
+```
+
+### Merge Operation
+
+Combine multiple Level 4 units into one:
+
+```typescript
+// POST /api/forest/geo/operations (type: MERGE)
+const payload = {
+  operationType: "MERGE",
+  sourceLevel4Ids: ["abc-123", "def-456"],
+  mergedUnit: {
+    code: "ROD-001",
+    name: "Rodal 001 Consolidado",
+    type: "RODAL",
+    level3Id: "level3-id",
+    currentLandUseName: "Bosque Productivo",
+  },
+  variationDate: "2024-01-15",
+  notes: "Consolidación de rodales pequeños",
+};
+```
+
+### Land Patrimonial Variations
+
+Track land use changes and calculate patrimonial value impact:
+
+```prisma
+model LandPatrimonialVariation {
+  id                      String                     @id @default(uuid())
+  organizationId          String
+  level4Id                String
+  previousLandUseName     String?
+  newLandUseName          String
+  affectedAreaHa          Decimal                    @db.Decimal(12, 4)
+  referenceValueBeforeUsd Decimal                    @db.Decimal(18, 2)
+  referenceValueAfterUsd  Decimal                    @db.Decimal(18, 2)
+  totalValueBeforeUsd     Decimal                    @db.Decimal(18, 2)
+  totalValueAfterUsd      Decimal                    @db.Decimal(18, 2)
+  patrimonialDeltaUsd     Decimal                    @db.Decimal(18, 2)
+  kind                    PatrimonialVariationKind   // INCREMENTO, DECREMENTO
+  status                  PatrimonialVariationStatus @default(PENDIENTE)
+  variationDate           DateTime
+  notes                   String?
+  processedAt             DateTime?
+  createdById             String
+  processedById           String?
+  
+  organization            Organization
+  level4                  ForestPatrimonyLevel4
+  createdBy               User
+  processedBy             User?
+  
+  @@map("land_patrimonial_variations")
+}
+
+enum PatrimonialVariationKind {
+  INCREMENTO   // Value increase
+  DECREMENTO   // Value decrease
+  SIN_CAMBIO   // No change
+}
+
+enum PatrimonialVariationStatus {
+  PENDIENTE    // Pending approval
+  PROCESADA    // Processed
+  ANULADA      // Cancelled
+}
+```
+
+### Geo Variation Job Queue
+
+```prisma
+model GeoLandVariationJob {
+  id             String                    @id @default(uuid())
+  organizationId String
+  status         GeoVariationJobStatus     @default(PENDING)
+  operationType  GeoVariationOperationType
+  variationDate  DateTime
+  notes          String?
+  payload        Json                      // Operation details
+  attempts       Int                       @default(0)
+  runAfter       DateTime                  @default(now())
+  startedAt      DateTime?
+  completedAt    DateTime?
+  lastError      String?
+  createdById    String?
+  
+  organization   Organization
+  createdBy      User?
+  
+  @@map("geo_land_variation_jobs")
+}
+
+enum GeoVariationOperationType {
+  SPLIT
+  MERGE
+}
+```
+
+## Geometry Recalculation
+
+When Level 4 attributes change, geometry metrics are recalculated:
+
+```prisma
+model ForestGeometryRecalcJob {
+  id             String             @id @default(uuid())
+  organizationId String
+  level4Id       String
+  status         GeoRecalcJobStatus @default(PENDING)
+  attempts       Int                @default(0)
+  runAfter       DateTime           @default(now())
+  lastError      String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdById    String?
+  
+  level4         ForestPatrimonyLevel4
+  
+  @@map("forest_geometry_recalc_jobs")
+}
+
+enum GeoRecalcJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+```
+
+**Trigger recalculation:**
+
+```typescript
+import { enqueueLevel4RecalcJob } from "@/lib/geo-import-worker";
+
+void enqueueLevel4RecalcJob({
+  organizationId,
+  level4Id: updated.id,
+  createdById: authResult.session.user.id,
+});
+```
+
+## GeoJSON Layer API
+
+### Get Level 4 Geometries
+
+```typescript
+// GET /api/forest/geo/layers/nivel4?bbox=-180,-85,180,85
+export async function GET(req: NextRequest) {
+  const bbox = req.nextUrl.searchParams.get("bbox") ?? "-180,-85,180,85";
+  const [minLng, minLat, maxLng, maxLat] = bbox.split(",").map(Number);
+  
+  const features = await prisma.$queryRaw<RawGeometry[]>`
+    SELECT
+      g.id,
+      g.level4_id,
+      l4.code AS level4_code,
+      l4.name AS level4_name,
+      l3.id AS level3_id,
+      l3.code AS level3_code,
+      l2.id AS level2_id,
+      l2.code AS level2_code,
+      g.superficie_ha,
+      ST_AsGeoJSON(g.geom)::json AS geometry
+    FROM forest_geometry_n4 g
+    JOIN forest_patrimony_level4 l4 ON g.level4_id = l4.id
+    JOIN forest_patrimony_level3 l3 ON l4.level3_id = l3.id
+    JOIN forest_patrimony_level2 l2 ON l3.level2_id = l2.id
+    WHERE g.is_active = TRUE
+      AND ST_Intersects(
+        g.geom,
+        ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326)
+      )
+  `;
+  
+  const featureCollection: FeatureCollection = {
+    type: "FeatureCollection",
+    features: features.map(f => ({
+      type: "Feature",
+      geometry: f.geometry,
+      properties: {
+        level4Id: f.level4_id,
+        level4Code: f.level4_code,
+        level4Name: f.level4_name,
+        surfaceHa: Number(f.superficie_ha),
+      },
+    })),
+  };
+  
+  return ok({ data: featureCollection });
+}
+```
+
+## PostGIS Spatial Queries
+
+### Calculate Area in Hectares
+
+```sql
+SELECT
+  id,
+  level4_id,
+  ST_Area(geom::geography) / 10000.0 AS superficie_ha
+FROM forest_geometry_n4
+WHERE is_active = TRUE;
+```
+
+### Find Geometries by Point
+
+```sql
+SELECT *
+FROM forest_geometry_n4
+WHERE is_active = TRUE
+  AND ST_Contains(geom, ST_SetSRID(ST_MakePoint(-66.5, 8.5), 4326));
+```
+
+### Buffer Analysis
+
+```sql
+SELECT
+  id,
+  ST_Buffer(geom::geography, 100)::geometry AS buffered_geom
+FROM forest_geometry_n4
+WHERE level4_id = 'abc-123';
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Async Jobs" icon="gears">
+    Process large shapefiles asynchronously to avoid timeouts
+  </Card>
+  <Card title="Version Geometries" icon="code-branch">
+    Always keep historical geometries with `validFrom`/`validTo`
+  </Card>
+  <Card title="Validate Topology" icon="check-double">
+    Check for self-intersections and invalid polygons before import
+  </Card>
+  <Card title="Index Spatial Columns" icon="magnifying-glass-chart">
+    Create GiST indexes on `geom` columns for fast queries
+  </Card>
+</CardGroup>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Forest Patrimony" icon="tree" href="/features/forest-patrimony">
+    Level 2-5 hierarchical land structure
+  </Card>
+  <Card title="Asset Measurements" icon="ruler" href="/features/asset-measurements">
+    Field measurement campaigns
+  </Card>
+</CardGroup>

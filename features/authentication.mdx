@@ -1,0 +1,434 @@
+---
+title: Authentication
+description: NextAuth v5 authentication system with multi-provider support, role-based access control, and comprehensive security features
+icon: lock
+---
+
+## Overview
+
+SMyEG implements a robust authentication system using **NextAuth.js v5** with JWT-based sessions, multi-organization support, and enterprise security features including account lockouts, audit logging, and password reset flows.
+
+## Authentication Architecture
+
+### NextAuth v5 Configuration
+
+The authentication system is configured in `src/lib/auth.ts`:
+
+```typescript
+import NextAuth from "next-auth";
+import Credentials from "next-auth/providers/credentials";
+
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  trustHost: true,
+  session: { strategy: "jwt" },
+  pages: { signIn: "/login" },
+  providers: [
+    Credentials({
+      async authorize(credentials) {
+        // Custom authentication logic
+      }
+    })
+  ],
+  callbacks: {
+    async jwt({ token, user }) {
+      // Enrich JWT with roles, permissions, organization
+    },
+    async session({ session, token }) {
+      // Map token data to session
+    }
+  }
+});
+```
+
+### Supported Authentication Providers
+
+<CardGroup cols={2}>
+  <Card title="Local Credentials" icon="user">
+    Username/email + password authentication with bcrypt password hashing
+  </Card>
+  <Card title="Google OAuth" icon="google">
+    OAuth 2.0 integration for Google accounts (configured via AuthProvider enum)
+  </Card>
+  <Card title="GitHub OAuth" icon="github">
+    OAuth integration for GitHub authentication
+  </Card>
+  <Card title="Microsoft OAuth" icon="microsoft">
+    Enterprise SSO via Microsoft Azure AD
+  </Card>
+</CardGroup>
+
+## User Model & Status Management
+
+### User Schema (Prisma)
+
+```prisma
+model User {
+  id                   String        @id @default(uuid())
+  organizationId       String?       // Multi-tenant association
+  email                String        @unique
+  emailVerifiedAt      DateTime?
+  username             String?       @unique
+  passwordHash         String?
+  authProvider         AuthProvider  @default(LOCAL)
+  providerId           String?
+  status               UserStatus    @default(PENDING_VERIFICATION)
+  
+  // Security features
+  failedLoginAttempts  Int          @default(0)
+  lockedUntil          DateTime?
+  mfaEnabled           Boolean      @default(false)
+  mfaSecret            String?
+  mfaBackupCodes       String[]
+  
+  // Profile
+  firstName            String?
+  lastName             String?
+  displayName          String?
+  avatarUrl            String?
+  
+  // Relations
+  organization         Organization?
+  userRoles            UserRole[]
+  sessions             Session[]
+  auditLogs            AuditLog[]
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  PENDING_VERIFICATION
+  LOCKED
+  DELETED
+}
+
+enum AuthProvider {
+  LOCAL
+  GOOGLE
+  GITHUB
+  MICROSOFT
+}
+```
+
+## Authentication Flow
+
+### Login Process
+
+<Steps>
+  <Step title="User submits credentials">
+    Username/email, password, and **organizationId** are required
+  </Step>
+  <Step title="User validation">
+    System checks:
+    - User exists
+    - User status is ACTIVE
+    - Account is not locked
+    - Password is valid
+  </Step>
+  <Step title="Organization authorization">
+    Validates user has access to the selected organization (see [Organizations](/features/organizations))
+  </Step>
+  <Step title="Load permissions">
+    Fetches user roles and permissions via `getUserRolesAndPermissions()`
+  </Step>
+  <Step title="Create session">
+    JWT token is created with user ID, roles, permissions, and organization context
+  </Step>
+  <Step title="Audit logging">
+    LOGIN event is recorded in AuditLog table
+  </Step>
+</Steps>
+
+### Failed Login Handling
+
+```typescript
+// From src/lib/auth.ts
+if (!valid) {
+  const attempts = user.failedLoginAttempts + 1;
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      failedLoginAttempts: attempts,
+      lockedUntil: attempts >= 5 
+        ? new Date(Date.now() + 30 * 60 * 1000) // 30 min lockout
+        : null,
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      action: "LOGIN_FAILED",
+      entityType: "User",
+      entityId: user.id,
+    },
+  });
+
+  return null;
+}
+```
+
+<Warning>
+  After **5 failed login attempts**, the account is locked for **30 minutes**. The `lockedUntil` timestamp prevents authentication during this period.
+</Warning>
+
+## Session Management
+
+### JWT Session Structure
+
+```typescript
+// Session includes:
+interface Session {
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    roles: string[];              // ["USER", "ADMIN", etc.]
+    permissions: string[];        // ["forest-patrimony:READ", ...]
+    organizationId: string | null;
+    organizationName: string | null;
+  }
+}
+```
+
+### Session Table (Database)
+
+```prisma
+model Session {
+  id           String    @id @default(uuid())
+  userId       String
+  tokenHash    String    @unique
+  refreshToken String?   @unique
+  ipAddress    String?
+  userAgent    String?
+  deviceInfo   Json?
+  isActive     Boolean   @default(true)
+  expiresAt    DateTime
+  lastActivity DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+  revokedAt    DateTime?
+  
+  user         User      @relation(fields: [userId], references: [id])
+  auditLogs    AuditLog[]
+}
+```
+
+## Password Management
+
+### Password Reset Flow
+
+```prisma
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+}
+```
+
+**API Endpoints:**
+- `POST /api/auth/forgot-password` - Request password reset
+- `POST /api/auth/reset-password` - Complete reset with token
+
+### Email Verification
+
+```prisma
+model EmailVerificationToken {
+  id         String    @id @default(uuid())
+  userId     String
+  email      String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  verifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id])
+}
+```
+
+## User Registration
+
+### Registration Endpoint
+
+```typescript
+// POST /api/auth/register
+import { hashPassword } from "@/lib/crypto";
+import { ensureRoleWithPermissions } from "@/lib/role-provisioning";
+
+const passwordHash = await hashPassword(password);
+
+const user = await prisma.user.create({
+  data: {
+    email,
+    firstName,
+    lastName,
+    passwordHash,
+    status: "PENDING_VERIFICATION",
+    organizationId: organization.id,
+    userRoles: {
+      create: {
+        roleId: role.id,
+      },
+    },
+  },
+});
+```
+
+<Info>
+  New users are created with `PENDING_VERIFICATION` status and require admin approval before they can log in.
+</Info>
+
+## Authorization Helpers
+
+### Require Authentication
+
+```typescript
+import { requireAuth } from "@/lib/api-helpers";
+
+export async function GET(req: NextRequest) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+  
+  // Access session data
+  const userId = authResult.session.user.id;
+  const orgId = authResult.session.user.organizationId;
+}
+```
+
+### Require Permission
+
+```typescript
+import { requirePermission } from "@/lib/api-helpers";
+
+const permissionError = requirePermission(
+  authResult.session.user.permissions,
+  "forest-patrimony",
+  "CREATE"
+);
+if (permissionError) return permissionError;
+```
+
+### Check Permission
+
+```typescript
+import { hasPermission } from "@/lib/permissions";
+
+const canRead = hasPermission(
+  permissions,
+  "forest-patrimony",
+  "READ"
+);
+
+const canAdmin = hasPermission(
+  permissions,
+  "forest-patrimony",
+  "ADMIN"
+);
+```
+
+## Multi-Factor Authentication (MFA)
+
+### MFA Schema Support
+
+```typescript
+interface MFAFields {
+  mfaEnabled: boolean;
+  mfaSecret: string | null;       // TOTP secret
+  mfaBackupCodes: string[];       // One-time recovery codes
+}
+```
+
+<Note>
+  MFA implementation uses TOTP (Time-based One-Time Password) with backup recovery codes. The schema supports MFA, but UI implementation may vary.
+</Note>
+
+## Audit Trail
+
+### Authentication Events
+
+All authentication events are logged to the `AuditLog` table:
+
+```prisma
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  LOGIN_FAILED
+  PASSWORD_RESET
+  PERMISSION_CHANGE
+  // ... other actions
+}
+
+model AuditLog {
+  id             String      @id @default(uuid())
+  userId         String?
+  sessionId      String?
+  action         AuditAction
+  entityType     String?
+  entityId       String?
+  oldValues      Json?
+  newValues      Json?
+  ipAddress      String?
+  userAgent      String?
+  metadata       Json?
+  createdAt      DateTime    @default(now())
+}
+```
+
+**Example audit log entry:**
+
+```json
+{
+  "userId": "123e4567-e89b-12d3-a456-426614174000",
+  "action": "LOGIN",
+  "entityType": "User",
+  "entityId": "123e4567-e89b-12d3-a456-426614174000",
+  "ipAddress": "192.168.1.1",
+  "createdAt": "2024-01-15T10:30:00Z"
+}
+```
+
+## Security Features
+
+<CardGroup cols={2}>
+  <Card title="Password Hashing" icon="shield-halved">
+    Bcrypt with salt for secure password storage
+  </Card>
+  <Card title="Account Lockout" icon="lock">
+    5 failed attempts = 30-minute lockout
+  </Card>
+  <Card title="JWT Sessions" icon="key">
+    Stateless authentication with encrypted tokens
+  </Card>
+  <Card title="Audit Logging" icon="list">
+    Complete authentication event tracking
+  </Card>
+  <Card title="Multi-Org Context" icon="building">
+    Organization-scoped authentication
+  </Card>
+  <Card title="Role-Based Access" icon="user-shield">
+    Fine-grained permission system
+  </Card>
+</CardGroup>
+
+## API Routes Reference
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/auth/[...nextauth]` | POST | NextAuth handler (sign in/out) |
+| `/api/auth/register` | POST | Create new user account |
+| `/api/auth/login-validation` | POST | Pre-login validation |
+| `/api/auth/forgot-password` | POST | Request password reset token |
+| `/api/auth/reset-password` | POST | Reset password with token |
+| `/api/auth/organization-options` | GET | List orgs for user login |
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Organizations" icon="building" href="/features/organizations">
+    Multi-tenant organization architecture
+  </Card>
+  <Card title="Analytics" icon="chart-line" href="/features/analytics">
+    Audit logging and security metrics
+  </Card>
+</CardGroup>

@@ -1,0 +1,417 @@
+---
+title: PM2 Deployment on Windows
+description: Deploy SMyEG on Windows using PM2 process manager without Docker
+---
+
+## Overview
+
+PM2 is a production-grade process manager for Node.js applications. This guide covers deploying the SMyEG web application and background workers on Windows using PM2.
+
+<Note>
+  This deployment method runs all services natively on Windows. You'll need to install PostgreSQL and Redis separately or use managed services.
+</Note>
+
+## Prerequisites
+
+- **Windows**: 10/11 or Windows Server 2019+
+- **Node.js**: v20 or higher ([download](https://nodejs.org/))
+- **pnpm**: Install with `npm install -g pnpm`
+- **PostgreSQL**: 15+ with PostGIS extension
+- **Redis**: Redis for Windows or cloud service
+
+## PM2 Installation
+
+Install PM2 globally:
+
+```bash
+npm install -g pm2
+```
+
+Verify installation:
+
+```bash
+pm2 --version
+```
+
+## Configuration
+
+The project includes `ecosystem.config.cjs` that defines two PM2 processes:
+
+```javascript ecosystem.config.cjs
+module.exports = {
+  apps: [
+    {
+      name: "confor-web",
+      cwd: ".",
+      script: "cmd",
+      args: "/c pnpm start",
+      env: {
+        NODE_ENV: "production",
+      },
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 3000,
+    },
+    {
+      name: "confor-geo-worker",
+      cwd: ".",
+      script: "cmd",
+      args: "/c pnpm worker:geo",
+      env: {
+        NODE_ENV: "production",
+        GEO_WORKER_INTERVAL_MS: "5000",
+        GEO_IMPORT_BATCH_SIZE: "500",
+        GEO_RECALC_BATCH_SIZE: "200",
+      },
+      autorestart: true,
+      max_restarts: 20,
+      restart_delay: 3000,
+    },
+  ],
+};
+```
+
+<Warning>
+  The configuration uses `cmd /c` to execute pnpm commands on Windows. This ensures proper process management.
+</Warning>
+
+## Deployment Steps
+
+<Steps>
+  <Step title="Install Dependencies">
+    ```bash
+    pnpm install
+    ```
+  </Step>
+
+  <Step title="Configure Environment">
+    Create `.env` file with production values:
+    
+    ```bash .env
+    DATABASE_URL="postgresql://user:password@localhost:5432/smyeg_prod"
+    REDIS_URL="redis://localhost:6379"
+    AUTH_SECRET="your-generated-secret"
+    NEXTAUTH_URL="https://yourdomain.com"
+    
+    # Worker configuration
+    GEO_WORKER_INTERVAL_MS="5000"
+    GEO_IMPORT_BATCH_SIZE="500"
+    GEO_RECALC_BATCH_SIZE="200"
+    GEO_VARIATION_BATCH_SIZE="150"
+    
+    ASSET_MEASUREMENT_WORKER_INTERVAL_MS="4000"
+    ASSET_MEASUREMENT_WORKER_BATCH_SIZE="200"
+    ```
+  </Step>
+
+  <Step title="Initialize Database">
+    Generate Prisma client and apply migrations:
+    
+    ```bash
+    pnpm db:generate
+    pnpm db:migrate
+    pnpm db:seed
+    ```
+  </Step>
+
+  <Step title="Build Application">
+    Create production build:
+    
+    ```bash
+    pnpm build
+    ```
+    
+    This generates optimized Next.js bundles in `.next/` directory.
+  </Step>
+
+  <Step title="Start with PM2">
+    Launch all processes defined in ecosystem config:
+    
+    ```bash
+    pm2 start ecosystem.config.cjs
+    ```
+    
+    PM2 will start:
+    - `confor-web`: Next.js application on port 3000
+    - `confor-geo-worker`: Geospatial background worker
+  </Step>
+
+  <Step title="Verify Status">
+    Check all processes are running:
+    
+    ```bash
+    pm2 status
+    ```
+    
+    Expected output:
+    ```
+    ┌─────┬───────────────────────┬─────────┬─────────┬──────────┐
+    │ id  │ name                  │ mode    │ status  │ cpu      │
+    ├─────┼───────────────────────┼─────────┼─────────┼──────────┤
+    │ 0   │ confor-web            │ fork    │ online  │ 0%       │
+    │ 1   │ confor-geo-worker     │ fork    │ online  │ 0%       │
+    └─────┴───────────────────────┴─────────┴─────────┴──────────┘
+    ```
+  </Step>
+
+  <Step title="Save Configuration">
+    Persist PM2 process list for restarts:
+    
+    ```bash
+    pm2 save
+    ```
+  </Step>
+
+  <Step title="Enable Auto-Startup">
+    Configure PM2 to start on Windows boot:
+    
+    ```bash
+    pm2 startup
+    ```
+    
+    PM2 will display a command to run. Execute it, then save again:
+    
+    ```bash
+    pm2 save
+    ```
+  </Step>
+</Steps>
+
+## Process Management
+
+### View Logs
+
+<CodeGroup>
+```bash Web Application
+pm2 logs confor-web
+```
+
+```bash Geo Worker
+pm2 logs confor-geo-worker
+```
+
+```bash All Processes
+pm2 logs
+```
+
+```bash Last 100 Lines
+pm2 logs --lines 100
+```
+</CodeGroup>
+
+### Restart Processes
+
+```bash
+# Restart web app
+pm2 restart confor-web
+
+# Restart geo worker
+pm2 restart confor-geo-worker
+
+# Restart all
+pm2 restart all
+```
+
+### Stop Processes
+
+```bash
+# Stop specific process
+pm2 stop confor-web
+
+# Stop all
+pm2 stop all
+```
+
+### Delete Processes
+
+```bash
+# Remove specific process
+pm2 delete confor-web
+
+# Remove all
+pm2 delete all
+```
+
+### Monitor in Real-Time
+
+```bash
+pm2 monit
+```
+
+Displays live CPU, memory, and log output for all processes.
+
+## Adding the Asset Worker
+
+To add the asset measurement worker, extend `ecosystem.config.cjs`:
+
+```javascript ecosystem.config.cjs
+module.exports = {
+  apps: [
+    // ... existing apps ...
+    {
+      name: "confor-asset-worker",
+      cwd: ".",
+      script: "cmd",
+      args: "/c pnpm worker:assets",
+      env: {
+        NODE_ENV: "production",
+        ASSET_MEASUREMENT_WORKER_INTERVAL_MS: "4000",
+        ASSET_MEASUREMENT_WORKER_BATCH_SIZE: "200",
+      },
+      autorestart: true,
+      max_restarts: 20,
+      restart_delay: 3000,
+    },
+  ],
+};
+```
+
+Reload configuration:
+
+```bash
+pm2 restart ecosystem.config.cjs
+```
+
+## Production Best Practices
+
+### Environment-Specific Configs
+
+Create separate configs for staging and production:
+
+<CodeGroup>
+```javascript ecosystem.production.config.cjs
+module.exports = {
+  apps: [
+    {
+      name: "smyeg-web",
+      script: "cmd",
+      args: "/c pnpm start",
+      env: {
+        NODE_ENV: "production",
+        PORT: "3000",
+      },
+      instances: 2,  // Run 2 instances for load balancing
+      exec_mode: "cluster",
+      max_memory_restart: "1G",
+    },
+  ],
+};
+```
+
+```javascript ecosystem.staging.config.cjs
+module.exports = {
+  apps: [
+    {
+      name: "smyeg-web-staging",
+      script: "cmd",
+      args: "/c pnpm start",
+      env: {
+        NODE_ENV: "staging",
+        PORT: "3001",
+      },
+    },
+  ],
+};
+```
+</CodeGroup>
+
+Start with specific config:
+
+```bash
+pm2 start ecosystem.production.config.cjs
+```
+
+### Log Rotation
+
+Enable PM2 log rotation to prevent disk space issues:
+
+```bash
+pm2 install pm2-logrotate
+
+# Configure rotation
+pm2 set pm2-logrotate:max_size 10M
+pm2 set pm2-logrotate:retain 30
+pm2 set pm2-logrotate:compress true
+```
+
+### Memory Limits
+
+Auto-restart processes that exceed memory threshold:
+
+```javascript
+{
+  name: "confor-web",
+  max_memory_restart: "1G",
+  // ...
+}
+```
+
+### Error Handling
+
+Limit restart attempts to avoid infinite restart loops:
+
+```javascript
+{
+  name: "confor-geo-worker",
+  max_restarts: 10,
+  min_uptime: "10s",  // Consider failed if crashes within 10s
+  // ...
+}
+```
+
+## Troubleshooting
+
+### Process Crashes Immediately
+
+**Symptom**: Process status shows "errored" or restarts continuously.
+
+**Solution**: Check logs for errors:
+
+```bash
+pm2 logs confor-web --err --lines 50
+```
+
+Common issues:
+- Missing `.env` file
+- Database connection failure
+- Port already in use
+
+### High Memory Usage
+
+**Solution**: Monitor memory with `pm2 monit` and set limits:
+
+```bash
+pm2 restart confor-web --max-memory-restart 1G
+```
+
+### PM2 Not Starting on Boot
+
+**Solution**: Recreate startup script:
+
+```bash
+pm2 unstartup
+pm2 startup
+# Run the command PM2 displays
+pm2 save
+```
+
+### Logs Not Appearing
+
+**Solution**: PM2 log files are stored in:
+
+```
+C:\Users\<username>\.pm2\logs\
+```
+
+Check file permissions and disk space.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configure Workers" icon="gears" href="/deployment/workers/geo-worker">
+    Optimize worker settings for your workload
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/deployment/monitoring">
+    Set up health checks and alerts
+  </Card>
+</CardGroup>

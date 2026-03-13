@@ -1,0 +1,318 @@
+---
+title: 'Audit Logs'
+description: 'Query and export audit trail records with monthly partitioning'
+---
+
+## Overview
+
+The Audit Log API provides access to system audit trails that track user actions, entity changes, and security events. The `audit_logs` table uses **PostgreSQL monthly partitioning** to optimize performance for large-scale audit data.
+
+<Note>
+Partition management is handled by the script `scripts/create-audit-partition.ts` which creates new monthly partitions automatically.
+</Note>
+
+## AuditAction Enum
+
+All audit events are categorized by action type:
+
+| Action | Description |
+|--------|-------------|
+| `CREATE` | Entity creation |
+| `UPDATE` | Entity modification |
+| `DELETE` | Entity deletion |
+| `LOGIN` | Successful user login |
+| `LOGOUT` | User logout |
+| `LOGIN_FAILED` | Failed login attempt |
+| `PASSWORD_RESET` | Password reset request |
+| `PERMISSION_CHANGE` | Role or permission modification |
+| `EXPORT` | Data export operation |
+| `VIEW` | Record view/access |
+
+## Data Model
+
+The `AuditLog` model captures comprehensive audit information:
+
+```prisma
+model AuditLog {
+  id             String        @id @default(uuid())
+  organizationId String?
+  userId         String?
+  sessionId      String?
+  action         AuditAction
+  entityType     String?       // e.g., "User", "SystemConfiguration"
+  entityId       String?
+  entityName     String?
+  oldValues      Json?         // Previous state (for UPDATE)
+  newValues      Json?         // New state (for CREATE/UPDATE)
+  changedFields  String[]      // List of modified fields
+  ipAddress      String?
+  userAgent      String?
+  requestId      String?
+  durationMs     Int?
+  statusCode     Int?
+  errorMessage   String?
+  metadata       Json?
+  createdAt      DateTime
+}
+```
+
+## Partitioning Strategy
+
+Audit logs are **partitioned by month** using the `createdAt` timestamp:
+
+- Each partition covers one calendar month
+- Format: `audit_logs_YYYY_MM` (e.g., `audit_logs_2026_03`)
+- New partitions should be created before the month begins
+- Old partitions can be dropped or archived separately
+
+<Warning>
+Ensure partitions are created ahead of time using the partition creation script to avoid insert failures.
+</Warning>
+
+## GET /api/audit
+
+Retrieve paginated audit logs with optional filtering.
+
+### Authentication
+Requires authentication with `audit:READ` permission.
+
+### Query Parameters
+
+<ParamField query="page" type="number" default="1">
+  Page number for pagination
+</ParamField>
+
+<ParamField query="limit" type="number" default="50">
+  Number of records per page (max 100)
+</ParamField>
+
+<ParamField query="action" type="string">
+  Filter by audit action (e.g., `CREATE`, `UPDATE`, `LOGIN`)
+</ParamField>
+
+<ParamField query="entityType" type="string">
+  Filter by entity type (e.g., `User`, `SystemConfiguration`)
+</ParamField>
+
+### Response
+
+```json
+{
+  "items": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "organizationId": "org-123",
+      "userId": "user-456",
+      "action": "UPDATE",
+      "entityType": "SystemConfiguration",
+      "entityId": "config-789",
+      "oldValues": { "value": "false" },
+      "newValues": { "value": "true", "configType": "BOOLEAN" },
+      "changedFields": ["value"],
+      "ipAddress": "192.168.1.100",
+      "createdAt": "2026-03-13T10:30:00Z",
+      "user": {
+        "email": "admin@example.com",
+        "firstName": "Admin",
+        "lastName": "User"
+      }
+    }
+  ],
+  "pagination": {
+    "total": 1250,
+    "page": 1,
+    "limit": 50,
+    "totalPages": 25
+  }
+}
+```
+
+<ResponseField name="items" type="array">
+  Array of audit log records with populated user information
+</ResponseField>
+
+<ResponseField name="pagination" type="object">
+  Pagination metadata including total count and page information
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash cURL
+curl -X GET "https://api.smyeg.com/api/audit?page=1&limit=50&action=UPDATE" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('/api/audit?action=UPDATE&limit=50', {
+  headers: {
+    'Authorization': `Bearer ${token}`
+  }
+});
+const data = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://api.smyeg.com/api/audit',
+    params={'action': 'UPDATE', 'limit': 50},
+    headers={'Authorization': f'Bearer {token}'}
+)
+logs = response.json()
+```
+
+</CodeGroup>
+
+## POST /api/audit
+
+Export audit logs to JSON or CSV format.
+
+### Authentication
+Requires authentication with `audit:EXPORT` permission.
+
+### Request Body
+
+<ParamField body="format" type="string" default="json">
+  Export format: `json` or `csv`
+</ParamField>
+
+### Response
+
+Returns the most recent 500 audit log records.
+
+**JSON Format:**
+```json
+{
+  "checksum": "audit-1710327000000",
+  "data": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "action": "EXPORT",
+      "entityType": "AuditLog",
+      "userId": "user-456",
+      "createdAt": "2026-03-13T10:30:00.000Z"
+    }
+  ]
+}
+```
+
+**CSV Format:**
+```json
+{
+  "checksum": "audit-1710327000000",
+  "csv": "id,action,entityType,entityId,userId,createdAt\n550e8400...,EXPORT,AuditLog,,user-456,2026-03-13T10:30:00.000Z"
+}
+```
+
+<Note>
+An audit log entry is automatically created when exporting, recording the `EXPORT` action with the selected format in metadata.
+</Note>
+
+### Example Request
+
+<CodeGroup>
+
+```bash cURL (JSON)
+curl -X POST "https://api.smyeg.com/api/audit" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"format": "json"}'
+```
+
+```bash cURL (CSV)
+curl -X POST "https://api.smyeg.com/api/audit" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"format": "csv"}'
+```
+
+```javascript JavaScript
+const response = await fetch('/api/audit', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({ format: 'json' })
+});
+const exportData = await response.json();
+```
+
+</CodeGroup>
+
+## DELETE /api/audit
+
+Delete all audit log records. Use with extreme caution.
+
+### Authentication
+Requires authentication with `audit:DELETE` permission.
+
+<Warning>
+This operation permanently deletes ALL audit logs across all partitions. This action cannot be undone.
+</Warning>
+
+### Response
+
+```json
+{
+  "success": true
+}
+```
+
+### Example Request
+
+<CodeGroup>
+
+```bash cURL
+curl -X DELETE "https://api.smyeg.com/api/audit" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('/api/audit', {
+  method: 'DELETE',
+  headers: {
+    'Authorization': `Bearer ${token}`
+  }
+});
+const result = await response.json();
+```
+
+</CodeGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Partition Management">
+    - Create partitions at least 1 week before the new month
+    - Monitor partition sizes and consider archiving old partitions quarterly
+    - Test partition creation script in staging before production deployment
+  </Accordion>
+
+  <Accordion title="Query Optimization">
+    - Always filter by date ranges when querying large audit datasets
+    - Use `entityType` and `action` filters to reduce result sets
+    - Consider using cursor-based pagination for very large exports
+  </Accordion>
+
+  <Accordion title="Retention Policies">
+    - Define organization-specific audit retention policies (e.g., 90 days, 1 year)
+    - Archive old partitions to cold storage before dropping
+    - Document compliance requirements for audit trail retention
+  </Accordion>
+
+  <Accordion title="Security Considerations">
+    - Restrict `audit:DELETE` permission to super admins only
+    - Log all audit export operations for compliance
+    - Implement IP allowlisting for audit data access
+  </Accordion>
+</AccordionGroup>
+
+## Related Endpoints
+
+- [System Configuration](/api/config/settings) - Configuration changes are automatically logged
+- [Users](/api/users) - User authentication events generate audit logs
+- [Roles & Permissions](/api/roles) - Permission changes trigger `PERMISSION_CHANGE` audits

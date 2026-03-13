@@ -1,0 +1,404 @@
+---
+title: "Asset Measurement Observations"
+description: "Manage field measurement observations for asset monitoring campaigns"
+---
+
+## Overview
+
+AssetMeasurementObservation endpoints handle individual field measurements collected during campaigns. Each observation contains a JSON payload with protocol-specific data.
+
+## GET /api/assets/measurement-observations
+
+List measurement observations with filtering and pagination.
+
+### Query Parameters
+
+<ParamField query="campaignId" type="string" format="uuid">
+  Filter by campaign ID
+</ParamField>
+
+<ParamField query="domain" type="enum">
+  Filter by asset domain (BIOLOGICO, HIDROLOGICO, DENDROMETRICO, DEMOGRAFICO)
+</ParamField>
+
+<ParamField query="protocolType" type="enum">
+  Filter by measurement protocol type
+</ParamField>
+
+<ParamField query="level5UnitCode" type="string">
+  Filter by Level 5 unit code (plot/subplot)
+</ParamField>
+
+<ParamField query="sectionKey" type="string">
+  Filter by section key
+</ParamField>
+
+<ParamField query="search" type="string">
+  Search in level5UnitCode, sectionKey, and campaign code/name
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number
+</ParamField>
+
+<ParamField query="limit" type="integer" default="25">
+  Items per page
+</ParamField>
+
+<ParamField query="sortBy" type="enum" default="observedAt">
+  Sort field: observedAt, createdAt
+</ParamField>
+
+<ParamField query="sortOrder" type="enum" default="desc">
+  Sort order: asc, desc
+</ParamField>
+
+### Response
+
+<ResponseField name="items" type="array">
+  <Expandable title="Observation object">
+    <ResponseField name="id" type="string" format="uuid">
+      Observation ID
+    </ResponseField>
+    <ResponseField name="campaignId" type="string" format="uuid">
+      Campaign ID
+    </ResponseField>
+    <ResponseField name="level5UnitCode" type="string" nullable>
+      Level 5 unit code (max 80 chars)
+    </ResponseField>
+    <ResponseField name="sectionKey" type="string" nullable>
+      Section key for grouping (max 120 chars)
+    </ResponseField>
+    <ResponseField name="observedAt" type="string" format="datetime" nullable>
+      Observation timestamp
+    </ResponseField>
+    <ResponseField name="payload" type="object">
+      Protocol-specific measurement data (JSON)
+    </ResponseField>
+    <ResponseField name="campaign" type="object">
+      Campaign summary with domain and protocolType
+    </ResponseField>
+    <ResponseField name="createdAt" type="string" format="datetime">
+      Creation timestamp
+    </ResponseField>
+    <ResponseField name="updatedAt" type="string" format="datetime">
+      Last update timestamp
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="pagination" type="object">
+  Pagination metadata
+</ResponseField>
+
+<RequestExample>
+```bash cURL
+curl -X GET "https://api.smyeg.com/api/assets/measurement-observations?campaignId=abc123&page=1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+## POST /api/assets/measurement-observations
+
+Create a new measurement observation.
+
+### Request Body
+
+<ParamField body="campaignId" type="string" format="uuid" required>
+  Campaign ID
+</ParamField>
+
+<ParamField body="level5UnitCode" type="string">
+  Level 5 unit code (plot/subplot)
+</ParamField>
+
+<ParamField body="sectionKey" type="string">
+  Section key for grouping
+</ParamField>
+
+<ParamField body="observedAt" type="string" format="datetime">
+  Observation timestamp
+</ParamField>
+
+<ParamField body="payload" type="object" required>
+  Protocol-specific measurement data (JSON)
+</ParamField>
+
+### Payload Schemas by Protocol
+
+#### BIO_SOBREVIVENCIA (Survival Inventory)
+
+<ParamField body="payload.lineId" type="integer" required>
+  Line ID (positive integer)
+</ParamField>
+
+<ParamField body="payload.sampleUnitId" type="integer" required>
+  Sample unit ID (positive integer)
+</ParamField>
+
+<ParamField body="payload.spacingL1" type="number" required>
+  Spacing between rows (meters, > 0)
+</ParamField>
+
+<ParamField body="payload.spacingL2" type="number" required>
+  Spacing between trees (meters, > 0)
+</ParamField>
+
+<ParamField body="payload.liveNormal" type="integer" required>
+  Normal live plants count (>= 0)
+</ParamField>
+
+<ParamField body="payload.liveAtipic" type="integer" default="0">
+  Atypical live plants count (>= 0)
+</ParamField>
+
+<ParamField body="payload.liveDrought" type="integer" default="0">
+  Drought-stressed live plants count (>= 0)
+</ParamField>
+
+<ParamField body="payload.livePest" type="integer" default="0">
+  Pest-affected live plants count (>= 0)
+</ParamField>
+
+<ParamField body="payload.deadPest" type="integer" default="0">
+  Dead plants from pests (>= 0)
+</ParamField>
+
+<ParamField body="payload.deadDrought" type="integer" default="0">
+  Dead plants from drought (>= 0)
+</ParamField>
+
+<ParamField body="payload.deadMech" type="integer" default="0">
+  Dead plants from mechanical damage (>= 0)
+</ParamField>
+
+<ParamField body="payload.missingCount" type="integer" required>
+  Missing plants count (>= 0)
+</ParamField>
+
+<ParamField body="payload.avgHeight" type="number" required>
+  Average height in meters (>= 0)
+</ParamField>
+
+**Validation Rules:**
+- `liveTotal + deadTotal + missingCount` must equal theoretical density based on spacing
+- Theoretical density = 100 / (spacingL1 × spacingL2)
+- Tolerance: ±1 plant per 100m² sample unit
+
+#### Other Protocol Payloads
+
+See [Asset Measurement Worker](/api/assets/calculations#protocol-formulas) for detailed payload schemas for:
+- BIO_PREOPERATIVO
+- BIO_PRECOSECHA
+- BIO_CONTINUO
+- BIO_PARCELAS_PERMANENTES
+- HIDRO_ESTACION_METEOROLOGICA
+- HIDRO_ESTACION_HIDROLOGICA
+- DENDRO_PARCELA_MULTIPROPOSITO
+- DENDRO_PARCELA_CARBONO
+- DEMO_ENCUESTA_COMUNIDAD
+- DEMO_ENCUESTA_NUCLEO_FAMILIAR
+
+### Response
+
+Returns the created observation object with status 201.
+
+<RequestExample>
+```bash cURL
+curl -X POST "https://api.smyeg.com/api/assets/measurement-observations" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "campaignId": "abc123-def456",
+    "level5UnitCode": "P-001",
+    "sectionKey": "LINE-01",
+    "observedAt": "2026-03-15T10:30:00Z",
+    "payload": {
+      "lineId": 1,
+      "sampleUnitId": 1,
+      "spacingL1": 3.0,
+      "spacingL2": 3.0,
+      "liveNormal": 10,
+      "liveAtipic": 0,
+      "liveDrought": 0,
+      "livePest": 0,
+      "deadPest": 0,
+      "deadDrought": 1,
+      "deadMech": 0,
+      "missingCount": 0,
+      "avgHeight": 2.5
+    }
+  }'
+```
+
+```javascript JavaScript
+const observation = {
+  campaignId: 'abc123-def456',
+  level5UnitCode: 'P-001',
+  sectionKey: 'LINE-01',
+  observedAt: new Date().toISOString(),
+  payload: {
+    lineId: 1,
+    sampleUnitId: 1,
+    spacingL1: 3.0,
+    spacingL2: 3.0,
+    liveNormal: 10,
+    deadDrought: 1,
+    missingCount: 0,
+    avgHeight: 2.5
+  }
+};
+
+const response = await fetch('/api/assets/measurement-observations', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify(observation)
+});
+```
+</RequestExample>
+
+## PATCH /api/assets/measurement-observations
+
+Update an existing observation.
+
+### Request Body
+
+<ParamField body="id" type="string" format="uuid" required>
+  Observation ID
+</ParamField>
+
+<ParamField body="level5UnitCode" type="string">
+  Updated Level 5 unit code
+</ParamField>
+
+<ParamField body="sectionKey" type="string">
+  Updated section key
+</ParamField>
+
+<ParamField body="observedAt" type="string" format="datetime">
+  Updated observation timestamp
+</ParamField>
+
+<ParamField body="payload" type="object">
+  Updated measurement data
+</ParamField>
+
+### Response
+
+Returns the updated observation object.
+
+<RequestExample>
+```bash cURL
+curl -X PATCH "https://api.smyeg.com/api/assets/measurement-observations" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "obs-123",
+    "payload": {"avgHeight": 2.7}
+  }'
+```
+</RequestExample>
+
+## DELETE /api/assets/measurement-observations
+
+Delete an observation.
+
+### Request Body
+
+<ParamField body="id" type="string" format="uuid" required>
+  Observation ID
+</ParamField>
+
+### Response
+
+Returns the deleted observation ID.
+
+<RequestExample>
+```bash cURL
+curl -X DELETE "https://api.smyeg.com/api/assets/measurement-observations" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": "obs-123"}'
+```
+</RequestExample>
+
+## Import Endpoints
+
+### GET /api/assets/measurement-observations/import
+
+Download import template.
+
+<ParamField query="format" type="enum" default="csv">
+  Template format: csv, xlsx
+</ParamField>
+
+### POST /api/assets/measurement-observations/import
+
+Bulk import observations from CSV, Excel, or JSON file.
+
+**Supported Formats:**
+- `.csv` - Comma-separated values
+- `.xlsx` - Excel spreadsheet
+- `.json` - JSON array
+
+**Required Columns:**
+- `campaignId` - Campaign UUID
+- Protocol-specific payload fields (flattened)
+
+**Optional Columns:**
+- `level5UnitCode` - Plot code
+- `sectionKey` - Section grouping
+- `observedAt` - Timestamp
+
+## Export Endpoints
+
+### GET /api/assets/measurement-observations/export
+
+Export observations in CSV, Excel, or JSON format.
+
+<ParamField query="format" type="enum" default="csv">
+  Export format: csv, xlsx, json
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100" max="10000">
+  Maximum records to export
+</ParamField>
+
+Filters: Same as GET endpoint query parameters.
+
+<RequestExample>
+```bash cURL
+curl -X GET "https://api.smyeg.com/api/assets/measurement-observations/export?campaignId=abc123&format=xlsx" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -o observations.xlsx
+```
+</RequestExample>
+
+## Permissions
+
+- **READ** - View observations (permission: `asset-measurement:READ`)
+- **CREATE** - Create observations and import data (permission: `asset-measurement:CREATE`)
+- **UPDATE** - Modify observations (permission: `asset-measurement:UPDATE`)
+- **DELETE** - Delete observations (permission: `asset-measurement:DELETE`)
+
+## Validation Notes
+
+<Warning>
+  BIO_SOBREVIVENCIA observations are strictly validated:
+  - All count fields must be non-negative integers
+  - Live + Dead + Missing must match theoretical plant density
+  - Spacing values must be positive
+  - Average height must be non-negative
+</Warning>
+
+<Info>
+  Other protocol types have protocol-specific validation implemented in the calculation worker. Invalid observations are flagged during calculation job processing.
+</Info>
+
+## Related Endpoints
+
+- [Asset Measurement Campaigns](/api/assets/campaigns) - Manage campaigns
+- [Asset Calculation Jobs](/api/assets/calculations) - Process observations

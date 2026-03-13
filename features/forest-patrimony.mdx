@@ -1,0 +1,626 @@
+---
+title: Forest Patrimony
+description: 5-level hierarchical forest patrimony structure for managing land, biological assets, and inventory data
+icon: tree
+---
+
+## Overview
+
+SMyEG implements a comprehensive **5-level hierarchical system** for managing forest and land patrimony. This structure enables detailed tracking from large land parcels down to individual measurement plots, supporting biological asset management, inventory control, and geospatial operations.
+
+## Hierarchy Overview
+
+<Steps>
+  <Step title="Level 2 - Land Parcels">
+    Large land units: FINCA, PREDIO, HATO, FUNDO, HACIENDA, ABRAE
+  </Step>
+  <Step title="Level 3 - Management Sections">
+    Divisions: COMPARTIMIENTO, BLOCK, SECCION, LOTE, ZONA, ZONIFICACION
+  </Step>
+  <Step title="Level 4 - Management Units">
+    Operational units: RODAL, PARCELA, ENUMERATION, UNIDAD_DE_MANEJO, CONUCO
+  </Step>
+  <Step title="Level 5 - Measurement Plots">
+    Sampling units: REFERENCIA, SUBUNIDAD, SUBPARCELA, MUESTRA
+  </Step>
+  <Step title="Level 6 - Biological Assets">
+    Individual tree stands and inventory records
+  </Step>
+</Steps>
+
+## Level 2: Land Parcels (ForestPatrimonyLevel2)
+
+### Schema Definition
+
+```prisma
+model ForestPatrimonyLevel2 {
+  id                   String              @id @default(uuid())
+  organizationId       String?
+  code                 String              @unique
+  name                 String
+  type                 PatrimonyLevel2Type
+  legalDocumentDate    DateTime?
+  legalStatus          LegalStatus?
+  totalAreaHa          Decimal             @db.Decimal(12, 2)
+  centroidLatitude     Decimal?            @db.Decimal(10, 7)
+  centroidLongitude    Decimal?            @db.Decimal(10, 7)
+  ownerRepresentative  String?
+  publicRegistryNumber String?
+  publicRegistryDate   DateTime?
+  address              String?
+  lastInfoDate         DateTime?
+  isActive             Boolean             @default(true)
+  
+  organization         Organization?
+  neighbors            ForestPatrimonyNeighbor[]
+  level3Units          ForestPatrimonyLevel3[]
+}
+
+enum PatrimonyLevel2Type {
+  FINCA       // Farm
+  PREDIO      // Estate
+  HATO        // Ranch
+  FUNDO       // Rural property
+  HACIENDA    // Large estate
+  ABRAE       // Protected area (Venezuela)
+}
+
+enum LegalStatus {
+  ADQUISICION  // Acquisition
+  ARRIENDO     // Lease
+  USUFRUCTO    // Usufruct
+  COMODATO     // Commodatum
+  DECRETO      // Decree
+}
+```
+
+### Key Features
+
+<CardGroup cols={2}>
+  <Card title="Legal Documentation" icon="file-contract">
+    Track legal status, registry numbers, and documentation dates
+  </Card>
+  <Card title="Geographic Center" icon="location-dot">
+    Store centroid coordinates (latitude/longitude)
+  </Card>
+  <Card title="Neighbor Tracking" icon="people-group">
+    Record adjacent land parcels and boundaries
+  </Card>
+  <Card title="Organization Scoped" icon="building">
+    Each Level 2 belongs to a specific organization
+  </Card>
+</CardGroup>
+
+### Neighbor Tracking
+
+```prisma
+model ForestPatrimonyNeighbor {
+  id        String                @id @default(uuid())
+  level2Id  String
+  code      String
+  name      String
+  type      String                // Neighbor classification
+  createdAt DateTime              @default(now())
+  
+  level2    ForestPatrimonyLevel2
+  
+  @@unique([level2Id, code])
+}
+```
+
+## Level 3: Management Sections (ForestPatrimonyLevel3)
+
+### Schema Definition
+
+```prisma
+model ForestPatrimonyLevel3 {
+  id                String              @id @default(uuid())
+  level2Id          String
+  code              String
+  name              String
+  type              PatrimonyLevel3Type
+  totalAreaHa       Decimal             @db.Decimal(12, 2)
+  centroidLatitude  Decimal?            @db.Decimal(10, 7)
+  centroidLongitude Decimal?            @db.Decimal(10, 7)
+  lastInfoDate      DateTime?
+  isActive          Boolean             @default(true)
+  
+  level2            ForestPatrimonyLevel2
+  level4Units       ForestPatrimonyLevel4[]
+  
+  @@unique([level2Id, code])
+}
+
+enum PatrimonyLevel3Type {
+  COMPARTIMIENTO  // Compartment
+  BLOCK           // Block
+  SECCION         // Section
+  LOTE            // Lot
+  ZONA            // Zone
+  BLOQUE          // Block (Spanish)
+  ZONIFICACION    // Zoning
+}
+```
+
+<Info>
+  Level 3 units are always children of Level 2 parcels and provide the first subdivision for management purposes.
+</Info>
+
+## Level 4: Management Units (ForestPatrimonyLevel4)
+
+### Schema Definition
+
+```prisma
+model ForestPatrimonyLevel4 {
+  id                   String                    @id @default(uuid())
+  level3Id             String
+  code                 String
+  name                 String
+  type                 PatrimonyLevel4Type
+  fscCertificateStatus FscCertificateStatus      @default(NO)
+  currentLandUseName   String?
+  previousLandUseName  String?
+  landUseChangeDate    DateTime?
+  totalAreaHa          Decimal                   @db.Decimal(12, 2)
+  plantableAreaHa      Decimal?                  @db.Decimal(12, 2)
+  rotationPhase        String?                   // Growth cycle phase
+  previousUse          String?
+  centroidLatitude     Decimal?                  @db.Decimal(10, 7)
+  centroidLongitude    Decimal?                  @db.Decimal(10, 7)
+  lastInfoDate         DateTime?
+  isActive             Boolean                   @default(true)
+  
+  level3               ForestPatrimonyLevel3
+  level5Units          ForestPatrimonyLevel5[]
+  level6Assets         ForestBiologicalAssetLevel6[]
+  geometryVersions     ForestGeometryN4[]        // Geospatial data
+  assetMeasurementCampaigns AssetMeasurementCampaign[]
+  landPatrimonialVariations LandPatrimonialVariation[]
+  
+  @@unique([level3Id, code])
+}
+
+enum PatrimonyLevel4Type {
+  RODAL            // Stand (forestry)
+  PARCELA          // Plot
+  ENUMERATION      // Enumeration unit
+  UNIDAD_DE_MANEJO // Management unit
+  CONUCO           // Small farm plot
+  OTRO_USO         // Other use
+}
+
+enum FscCertificateStatus {
+  SI   // Yes (FSC certified)
+  NO   // Not certified
+}
+```
+
+### Land Use Tracking
+
+Level 4 tracks current and historical land use:
+
+- **currentLandUseName**: Current land use classification
+- **previousLandUseName**: Previous use (for change detection)
+- **landUseChangeDate**: When the land use changed
+- **rotationPhase**: Current growth/harvest cycle phase
+
+<Warning>
+  Level 4 is the **primary unit** for geospatial operations, biological asset tracking, and measurement campaigns.
+</Warning>
+
+### FSC Certification
+
+Forest Stewardship Council (FSC) certification status is tracked at Level 4:
+
+```typescript
+fscCertificateStatus: "SI" | "NO"
+```
+
+## Level 5: Measurement Plots (ForestPatrimonyLevel5)
+
+### Schema Definition
+
+```prisma
+model ForestPatrimonyLevel5 {
+  id                String                @id @default(uuid())
+  level4Id          String
+  code              String
+  name              String
+  type              PatrimonyLevel5Type
+  shapeType         PlotShapeType
+  dimension1M       Decimal?              @db.Decimal(12, 4)
+  dimension2M       Decimal?              @db.Decimal(12, 4)
+  dimension3M       Decimal?              @db.Decimal(12, 4)
+  dimension4M       Decimal?              @db.Decimal(12, 4)
+  areaM2            Decimal               @db.Decimal(12, 4)
+  centroidLatitude  Decimal?              @db.Decimal(10, 7)
+  centroidLongitude Decimal?              @db.Decimal(10, 7)
+  lastInfoDate      DateTime?
+  isActive          Boolean               @default(true)
+  
+  level4            ForestPatrimonyLevel4
+  
+  @@unique([level4Id, code])
+}
+
+enum PatrimonyLevel5Type {
+  REFERENCIA  // Reference plot
+  SUBUNIDAD   // Sub-unit
+  SUBPARCELA  // Sub-plot
+  MUESTRA     // Sample
+  SUBMUESTRA  // Sub-sample
+}
+
+enum PlotShapeType {
+  RECTANGULAR
+  CUADRADA    // Square
+  CIRCULAR
+  HEXAGONAL
+}
+```
+
+### Plot Area Calculation
+
+The system automatically calculates `areaM2` based on shape and dimensions:
+
+```typescript
+// From src/lib/forest-area.ts
+export function calculatePlotAreaM2(plot: {
+  shapeType: PlotShapeType;
+  dimension1M: number | null;
+  dimension2M: number | null;
+  dimension3M?: number | null;
+  dimension4M?: number | null;
+}): number | null {
+  switch (plot.shapeType) {
+    case "RECTANGULAR":
+      return (dimension1M ?? 0) * (dimension2M ?? 0);
+    
+    case "CUADRADA":
+      return (dimension1M ?? 0) ** 2;
+    
+    case "CIRCULAR":
+      const radius = (dimension1M ?? 0) / 2;
+      return Math.PI * radius ** 2;
+    
+    case "HEXAGONAL":
+      const side = dimension1M ?? 0;
+      return (3 * Math.sqrt(3) / 2) * side ** 2;
+  }
+}
+```
+
+## Level 6: Biological Assets (ForestBiologicalAssetLevel6)
+
+### Schema Definition
+
+```prisma
+model ForestBiologicalAssetLevel6 {
+  id                            String              @id @default(uuid())
+  level4Id                      String
+  biologicalAssetKey            String              @unique
+  accountingKey                 String?
+  establishmentDate             DateTime?
+  plantingYear                  Int?
+  
+  // Genetic material
+  geneticMaterialCode           String?
+  geneticMaterialName           String?
+  
+  // Asset classification
+  assetType                     BiologicalAssetType @default(COMERCIAL)
+  managementSchemeCode          String?
+  managementSchemeName          String?
+  
+  // Inventory data
+  inventoryCode                 String?
+  inventoryType                 String?
+  inventoryDate                 DateTime?
+  inventoryAgeYears             Int?
+  level5UnitCount               Int?                // Number of plots
+  
+  // Spacing and density
+  spacingCode                   String?
+  spacingBetweenRowsM           Decimal?            @db.Decimal(12, 4)
+  spacingBetweenTreesM          Decimal?            @db.Decimal(12, 4)
+  treeDensityPerHa              Decimal?            @db.Decimal(12, 0)
+  survivalRate                  Decimal?            @db.Decimal(5, 2)
+  
+  // Measurements
+  dominantHeightM               Decimal?            @db.Decimal(12, 4)
+  meanHeightM                   Decimal?            @db.Decimal(12, 4)
+  quadraticDiameterM            Decimal?            @db.Decimal(12, 4)
+  basalAreaM2                   Decimal?            @db.Decimal(12, 4)
+  
+  // Volume calculations
+  unitVolumeM3NoBarkPerHa       Decimal?            @db.Decimal(12, 4)
+  unitVolumeM3WithBarkPerHa     Decimal?            @db.Decimal(12, 4)
+  totalVolumeM3NoBark           Decimal?            @db.Decimal(12, 4)
+  totalVolumeM3WithBark         Decimal?            @db.Decimal(12, 4)
+  adjustedVolumeM3NoBarkPerHa   Decimal?            @db.Decimal(12, 4)
+  adjustedVolumeM3WithBarkPerHa Decimal?            @db.Decimal(12, 4)
+  
+  // IMA Classification
+  imaClassCode                  String?
+  imaClassName                  String?
+  
+  // Accounting
+  actualCostUsd                 Decimal?            @db.Decimal(18, 2)
+  
+  level4                        ForestPatrimonyLevel4
+}
+
+enum BiologicalAssetType {
+  COMERCIAL      // Commercial forestry
+  INVESTIGACION  // Research/experimental
+}
+
+enum ImaClassification {
+  I    // Class I (highest productivity)
+  II
+  III
+  IV
+  V    // Class V (lowest productivity)
+}
+```
+
+### IMA (Incremento Medio Anual)
+
+Mean Annual Increment classification for growth productivity:
+
+```prisma
+model ImaClass {
+  id             String            @id @default(uuid())
+  code           String
+  classification ImaClassification
+  name           String
+  description    String?
+  rangeMin       Decimal?          @db.Decimal(12, 4)
+  rangeMax       Decimal?          @db.Decimal(12, 4)
+  isActive       Boolean           @default(true)
+  organizationId String?
+  organization   Organization?
+}
+```
+
+## API Routes
+
+### Forest Patrimony CRUD
+
+```typescript
+// GET /api/forest/patrimony?level=2&page=1&limit=25
+export async function GET(req: NextRequest) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+  
+  const { level, page, limit, parentId, search } = queryResult.data;
+  
+  // Organization scoping
+  const organizationId = await resolveOrganizationId({
+    id: authResult.session.user.id,
+    organizationId: authResult.session.user.organizationId,
+  });
+  
+  if (level === "2") {
+    const where: Prisma.ForestPatrimonyLevel2WhereInput = {
+      ...(isOrgScoped ? { organizationId } : {}),
+      ...(search ? {
+        OR: [
+          { code: { contains: search, mode: "insensitive" } },
+          { name: { contains: search, mode: "insensitive" } },
+        ],
+      } : {}),
+    };
+    
+    const [total, items] = await Promise.all([
+      prisma.forestPatrimonyLevel2.count({ where }),
+      prisma.forestPatrimonyLevel2.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: [{ createdAt: "desc" }],
+      }),
+    ]);
+    
+    return ok({ items, pagination: { total, page, limit } });
+  }
+  
+  // Similar logic for levels 3, 4, 5
+}
+```
+
+### Create Patrimony Unit
+
+```typescript
+// POST /api/forest/patrimony
+export async function POST(req: NextRequest) {
+  const parsed = createPatrimonySchema.safeParse(body);
+  
+  if (parsed.data.level === "2") {
+    const created = await prisma.forestPatrimonyLevel2.create({
+      data: {
+        ...parsed.data.data,
+        organizationId,
+      },
+    });
+    
+    await safeAuditLog({
+      userId: authResult.session.user.id,
+      action: "CREATE",
+      entityType: "ForestPatrimonyLevel2",
+      entityId: created.id,
+      newValues: parsed.data.data,
+    });
+    
+    return ok(created, 201);
+  }
+  
+  // Handle levels 3, 4, 5 with parent validation
+}
+```
+
+### Update Level 4 (with Geometry Management)
+
+```typescript
+// PATCH /api/forest/patrimony
+export async function PATCH(req: NextRequest) {
+  const updated = await prisma.$transaction(async (tx) => {
+    const updatedLevel4 = await tx.forestPatrimonyLevel4.update({
+      where: { id: parsed.data.id },
+      data: level4Data,
+    });
+    
+    // Deactivate geometries when Level 4 is deactivated
+    if (level4Data.isActive === false && current.isActive) {
+      await tx.$executeRaw`
+        UPDATE public.forest_geometry_n4
+        SET is_active = FALSE,
+            valid_to = COALESCE(valid_to, NOW()),
+            updated_at = NOW()
+        WHERE organization_id = ${organizationId}::uuid
+          AND level4_id = ${parsed.data.id}::uuid
+          AND is_active = TRUE
+      `;
+    }
+    
+    return updatedLevel4;
+  });
+  
+  // Enqueue geometry recalculation job
+  if (organizationId) {
+    void enqueueLevel4RecalcJob({
+      organizationId,
+      level4Id: updated.id,
+      createdById: authResult.session.user.id,
+    });
+  }
+  
+  return ok(updated);
+}
+```
+
+## Supporting Catalogs
+
+### Management Schemes
+
+```prisma
+model ManagementScheme {
+  id             String        @id @default(uuid())
+  code           String
+  name           String
+  isActive       Boolean       @default(true)
+  organizationId String?
+  organization   Organization?
+  
+  @@unique([organizationId, code])
+}
+```
+
+### Forest Inventory Types
+
+```prisma
+model ForestInventoryTypeCatalog {
+  id             String        @id @default(uuid())
+  code           String
+  name           String
+  isActive       Boolean       @default(true)
+  organizationId String?
+  organization   Organization?
+  
+  @@unique([organizationId, code])
+}
+```
+
+### Species & Vegetal Materials
+
+```prisma
+model Species {
+  id               String            @id @default(uuid())
+  code             String
+  scientificName   String
+  commonName       String?
+  genus            String?
+  family           String?
+  taxonomicOrder   String?
+  isActive         Boolean           @default(true)
+  organizationId   String?
+  organization     Organization?
+  vegetalMaterials VegetalMaterial[]
+  
+  @@unique([organizationId, code])
+}
+
+model VegetalMaterial {
+  id             String              @id @default(uuid())
+  code           String
+  name           String
+  speciesId      String
+  materialType   VegetalMaterialType // PURA, HIBRIDA
+  plantType      PlantType           // PROGENIE, CLON, etc.
+  plantOrigin    PlantOrigin         // NATIVA, EXOTICA, etc.
+  provenanceId   String?
+  isActive       Boolean             @default(true)
+  organizationId String?
+  
+  species        Species
+  provenance     Provenance?
+  organization   Organization?
+}
+```
+
+## Hierarchical Queries
+
+Fetch complete hierarchy for a Level 4 unit:
+
+```typescript
+const level4 = await prisma.forestPatrimonyLevel4.findUnique({
+  where: { id },
+  include: {
+    level3: {
+      include: {
+        level2: {
+          include: {
+            organization: true,
+            neighbors: true,
+          },
+        },
+      },
+    },
+    level5Units: true,
+    level6Assets: true,
+    geometryVersions: {
+      where: { isActive: true },
+      orderBy: { validFrom: 'desc' },
+      take: 1,
+    },
+  },
+});
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Validate Hierarchy" icon="sitemap">
+    Always verify parent existence before creating child units
+  </Card>
+  <Card title="Enforce Unique Codes" icon="fingerprint">
+    Use `@@unique([parentId, code])` constraints for code uniqueness within parent
+  </Card>
+  <Card title="Calculate Areas" icon="calculator">
+    Auto-calculate Level 5 areas based on shape and dimensions
+  </Card>
+  <Card title="Track History" icon="clock-rotate-left">
+    Use `lastInfoDate` to track when data was last updated
+  </Card>
+</CardGroup>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Geospatial Data" icon="map" href="/features/geospatial-data">
+    Shapefile import and geometry management
+  </Card>
+  <Card title="Asset Measurements" icon="ruler" href="/features/asset-measurements">
+    Measurement campaigns and field observations
+  </Card>
+</CardGroup>

@@ -1,0 +1,111 @@
+---
+title: 'Authentication Overview'
+description: 'Learn about authentication and authorization in SMyEG'
+---
+
+## Overview
+
+SMyEG uses a multi-organization authentication system built on NextAuth.js with credential-based authentication. The system supports user registration, login with organization context, and secure password reset flows.
+
+## Authentication Flow
+
+### 1. User Registration
+New users register with email and password. Upon registration:
+- Users are automatically assigned to a default organization
+- Account status is set to `PENDING_VERIFICATION`
+- Users receive the "USER" role by default
+- An audit log entry is created
+
+### 2. Login Validation
+Before attempting login, the system validates:
+- User existence (by email or username)
+- Organization membership
+- Account status (must be `ACTIVE`)
+
+This pre-login validation helps provide better error messages to users.
+
+### 3. Authentication
+The actual login process:
+- Users authenticate with identifier (email or username), password, and organization ID
+- Failed login attempts are tracked (account locks after 5 failed attempts for 30 minutes)
+- Successful authentication creates a JWT session with user roles and permissions
+- Audit logs track both successful and failed login attempts
+
+### 4. Password Reset
+Secure two-step password reset flow:
+- Users request a reset token via email
+- Token is valid for 1 hour
+- Upon reset, all active sessions are revoked
+- Failed login attempts counter is reset
+
+## Multi-Organization Support
+
+SMyEG supports users belonging to multiple organizations:
+- Users select their organization at login time
+- Organization context is maintained in the JWT session
+- Organization-specific roles and permissions apply
+
+## Security Features
+
+### Password Requirements
+Passwords must:
+- Be at least 8 characters long
+- Contain at least one uppercase letter
+- Contain at least one lowercase letter
+- Contain at least one number
+
+### Account Locking
+- Accounts lock for 30 minutes after 5 failed login attempts
+- Lock status is checked before password verification
+- Password reset clears the lock and reset failed attempts counter
+
+### Session Management
+- JWT-based sessions (strategy: "jwt")
+- Sessions include user ID, roles, permissions, and organization context
+- All sessions are revoked when password is reset
+
+## API Response Format
+
+All authentication endpoints follow a consistent response format:
+
+**Success Response:**
+```json
+{
+  "success": true,
+  "data": {
+    // Response data
+  }
+}
+```
+
+**Error Response:**
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "details": {
+    // Optional additional error details
+  }
+}
+```
+
+## Common Error Codes
+
+| Code | Description |
+|------|-------------|
+| `USER_NOT_IN_ORG` | User does not belong to the selected organization |
+| `USER_NOT_ACTIVE` | User account is not in ACTIVE status |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Register" icon="user-plus" href="/api/auth/register">
+    Create a new user account
+  </Card>
+  <Card title="Login" icon="right-to-bracket" href="/api/auth/login">
+    Authenticate and obtain a session
+  </Card>
+  <Card title="Password Reset" icon="key" href="/api/auth/password-reset">
+    Reset a forgotten password
+  </Card>
+</CardGroup>

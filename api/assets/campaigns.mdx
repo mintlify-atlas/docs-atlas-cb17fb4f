@@ -1,0 +1,448 @@
+---
+title: "Asset Measurement Campaigns"
+description: "Manage measurement campaigns for biological, hydrological, dendrometric, and demographic asset monitoring"
+---
+
+## Overview
+
+AssetMeasurementCampaign endpoints manage field measurement campaigns across four domains: biological (survival, pre-harvest, continuous monitoring), hydrological (meteorological and hydrological stations), dendrometric (carbon, multipurpose plots), and demographic (community and household surveys).
+
+## Campaign Status Enum
+
+<ResponseField name="status" type="enum">
+  - `DRAFT` - Campaign in preparation
+  - `ACTIVE` - Campaign in progress
+  - `CLOSED` - Campaign completed
+  - `CANCELLED` - Campaign cancelled
+</ResponseField>
+
+## Asset Domain Enum
+
+<ResponseField name="domain" type="enum">
+  - `BIOLOGICO` - Biological assets monitoring
+  - `HIDROLOGICO` - Hydrological monitoring
+  - `DENDROMETRICO` - Dendrometric measurements
+  - `DEMOGRAFICO` - Demographic surveys
+</ResponseField>
+
+## Measurement Protocol Types
+
+<ResponseField name="protocolType" type="enum">
+  **Biological Domain:**
+  - `BIO_SOBREVIVENCIA` - Survival inventory
+  - `BIO_PREOPERATIVO` - Pre-operational assessment
+  - `BIO_PRECOSECHA` - Pre-harvest evaluation
+  - `BIO_CONTINUO` - Continuous monitoring
+  - `BIO_PARCELAS_PERMANENTES` - Permanent plots
+
+  **Hydrological Domain:**
+  - `HIDRO_ESTACION_METEOROLOGICA` - Meteorological station
+  - `HIDRO_ESTACION_HIDROLOGICA` - Hydrological station
+
+  **Dendrometric Domain:**
+  - `DENDRO_PARCELA_MULTIPROPOSITO` - Multipurpose plots
+  - `DENDRO_PARCELA_CARBONO` - Carbon plots
+
+  **Demographic Domain:**
+  - `DEMO_ENCUESTA_COMUNIDAD` - Community survey
+  - `DEMO_ENCUESTA_NUCLEO_FAMILIAR` - Household survey
+</ResponseField>
+
+<Note>
+  Each protocol type has specific validation rules and calculation formulas implemented in the worker.
+</Note>
+
+## GET /api/assets/measurement-campaigns
+
+List measurement campaigns with filtering and pagination.
+
+### Query Parameters
+
+<ParamField query="level4Id" type="string" format="uuid">
+  Filter by Level 4 patrimony unit
+</ParamField>
+
+<ParamField query="domain" type="enum">
+  Filter by asset domain (BIOLOGICO, HIDROLOGICO, DENDROMETRICO, DEMOGRAFICO)
+</ParamField>
+
+<ParamField query="protocolType" type="enum">
+  Filter by measurement protocol
+</ParamField>
+
+<ParamField query="status" type="enum">
+  Filter by campaign status (DRAFT, ACTIVE, CLOSED, CANCELLED)
+</ParamField>
+
+<ParamField query="search" type="string">
+  Search in campaign code and name
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number
+</ParamField>
+
+<ParamField query="limit" type="integer" default="25">
+  Items per page
+</ParamField>
+
+<ParamField query="sortBy" type="enum" default="campaignDate">
+  Sort field: campaignDate, campaignCode, campaignName, status, createdAt
+</ParamField>
+
+<ParamField query="sortOrder" type="enum" default="desc">
+  Sort order: asc, desc
+</ParamField>
+
+### Response
+
+<ResponseField name="items" type="array">
+  <Expandable title="Campaign object">
+    <ResponseField name="id" type="string" format="uuid">
+      Campaign ID
+    </ResponseField>
+    <ResponseField name="organizationId" type="string" format="uuid">
+      Organization ID
+    </ResponseField>
+    <ResponseField name="level4Id" type="string" format="uuid">
+      Level 4 patrimony unit ID
+    </ResponseField>
+    <ResponseField name="domain" type="enum">
+      Asset domain
+    </ResponseField>
+    <ResponseField name="protocolType" type="enum">
+      Measurement protocol type
+    </ResponseField>
+    <ResponseField name="campaignCode" type="string">
+      Unique campaign code (max 120 chars)
+    </ResponseField>
+    <ResponseField name="campaignName" type="string">
+      Campaign name (max 255 chars)
+    </ResponseField>
+    <ResponseField name="campaignDate" type="string" format="date">
+      Campaign reference date
+    </ResponseField>
+    <ResponseField name="schemaVersion" type="string" default="1.0">
+      Payload schema version
+    </ResponseField>
+    <ResponseField name="status" type="enum">
+      Campaign status
+    </ResponseField>
+    <ResponseField name="notes" type="string" nullable>
+      Additional notes
+    </ResponseField>
+    <ResponseField name="metadata" type="object" nullable>
+      Campaign metadata (JSON)
+    </ResponseField>
+    <ResponseField name="level4" type="object">
+      Level 4 unit summary
+    </ResponseField>
+    <ResponseField name="_count" type="object">
+      Counts of observations, results, and calculation jobs
+    </ResponseField>
+    <ResponseField name="createdAt" type="string" format="datetime">
+      Creation timestamp
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="pagination" type="object">
+  <ResponseField name="total" type="integer">Total count</ResponseField>
+  <ResponseField name="page" type="integer">Current page</ResponseField>
+  <ResponseField name="limit" type="integer">Items per page</ResponseField>
+  <ResponseField name="totalPages" type="integer">Total pages</ResponseField>
+</ResponseField>
+
+<RequestExample>
+```bash cURL
+curl -X GET "https://api.smyeg.com/api/assets/measurement-campaigns?domain=BIOLOGICO&status=ACTIVE&page=1&limit=25" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+## POST /api/assets/measurement-campaigns
+
+Create a new measurement campaign.
+
+### Request Body
+
+<ParamField body="level4Id" type="string" format="uuid" required>
+  Level 4 patrimony unit ID
+</ParamField>
+
+<ParamField body="domain" type="enum" required>
+  Asset domain (BIOLOGICO, HIDROLOGICO, DENDROMETRICO, DEMOGRAFICO)
+</ParamField>
+
+<ParamField body="protocolType" type="enum" required>
+  Measurement protocol type
+</ParamField>
+
+<ParamField body="campaignCode" type="string" required>
+  Unique campaign code (max 120 chars)
+</ParamField>
+
+<ParamField body="campaignName" type="string" required>
+  Campaign name (max 255 chars)
+</ParamField>
+
+<ParamField body="campaignDate" type="string" format="date" required>
+  Campaign reference date
+</ParamField>
+
+<ParamField body="schemaVersion" type="string" default="1.0">
+  Payload schema version (max 32 chars)
+</ParamField>
+
+<ParamField body="status" type="enum" default="DRAFT">
+  Campaign status
+</ParamField>
+
+<ParamField body="notes" type="string">
+  Additional notes
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Campaign metadata (JSON)
+</ParamField>
+
+### Response
+
+Returns the created campaign object with status 201.
+
+<RequestExample>
+```bash cURL
+curl -X POST "https://api.smyeg.com/api/assets/measurement-campaigns" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "level4Id": "a1b2c3d4-5678-90ab-cdef-123456789abc",
+    "domain": "BIOLOGICO",
+    "protocolType": "BIO_SOBREVIVENCIA",
+    "campaignCode": "BIO-2026-001",
+    "campaignName": "Inventario sobrevivencia Rodal R-001",
+    "campaignDate": "2026-03-15",
+    "status": "DRAFT"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('/api/assets/measurement-campaigns', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    level4Id: 'a1b2c3d4-5678-90ab-cdef-123456789abc',
+    domain: 'BIOLOGICO',
+    protocolType: 'BIO_SOBREVIVENCIA',
+    campaignCode: 'BIO-2026-001',
+    campaignName: 'Inventario sobrevivencia Rodal R-001',
+    campaignDate: '2026-03-15',
+    status: 'DRAFT'
+  })
+});
+```
+</RequestExample>
+
+## PATCH /api/assets/measurement-campaigns
+
+Update an existing campaign.
+
+### Request Body
+
+<ParamField body="id" type="string" format="uuid" required>
+  Campaign ID
+</ParamField>
+
+<ParamField body="campaignName" type="string">
+  Updated campaign name
+</ParamField>
+
+<ParamField body="campaignDate" type="string" format="date">
+  Updated campaign date
+</ParamField>
+
+<ParamField body="schemaVersion" type="string">
+  Updated schema version
+</ParamField>
+
+<ParamField body="status" type="enum">
+  Updated status
+</ParamField>
+
+<ParamField body="notes" type="string">
+  Updated notes
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Updated metadata
+</ParamField>
+
+### Response
+
+Returns the updated campaign object.
+
+<RequestExample>
+```bash cURL
+curl -X PATCH "https://api.smyeg.com/api/assets/measurement-campaigns" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "a1b2c3d4-5678-90ab-cdef-123456789abc",
+    "status": "ACTIVE"
+  }'
+```
+</RequestExample>
+
+## DELETE /api/assets/measurement-campaigns
+
+Delete a campaign. Only campaigns without observations or results can be deleted.
+
+### Request Body
+
+<ParamField body="id" type="string" format="uuid" required>
+  Campaign ID
+</ParamField>
+
+### Response
+
+Returns the deleted campaign ID.
+
+### Error Responses
+
+- **404** - Campaign not found
+- **409** - Campaign has associated observations or results and cannot be deleted
+
+<RequestExample>
+```bash cURL
+curl -X DELETE "https://api.smyeg.com/api/assets/measurement-campaigns" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": "a1b2c3d4-5678-90ab-cdef-123456789abc"}'
+```
+</RequestExample>
+
+## Import Endpoints
+
+### GET /api/assets/measurement-campaigns/import
+
+Download import template in CSV or Excel format.
+
+<ParamField query="format" type="enum" default="csv">
+  Template format: csv, xlsx
+</ParamField>
+
+### POST /api/assets/measurement-campaigns/import
+
+Bulk import campaigns from CSV, Excel, or JSON file.
+
+**Supported Formats:**
+- `.csv` - Comma-separated values
+- `.xlsx` - Excel spreadsheet
+- `.json` - JSON array
+
+**CSV/Excel Column Headers:**
+- `level4Id` - Level 4 ID (UUID)
+- `domain` - Asset domain
+- `protocolType` - Protocol type
+- `campaignCode` - Campaign code
+- `campaignName` - Campaign name
+- `campaignDate` - Campaign date (YYYY-MM-DD)
+- `status` - Status (optional, defaults to DRAFT)
+- `schemaVersion` - Schema version (optional, defaults to 1.0)
+- `notes` - Notes (optional)
+
+### Response
+
+<ResponseField name="created" type="integer">
+  Number of campaigns created
+</ResponseField>
+
+<ResponseField name="skipped" type="integer">
+  Number of rows skipped
+</ResponseField>
+
+<ResponseField name="errors" type="array">
+  Array of error objects with row number and error message
+</ResponseField>
+
+## Export Endpoints
+
+### GET /api/assets/measurement-campaigns/export
+
+Export campaigns in CSV, Excel, or JSON format.
+
+<ParamField query="format" type="enum" default="csv">
+  Export format: csv, xlsx, json
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100" max="5000">
+  Maximum records to export
+</ParamField>
+
+<ParamField query="level4Id" type="string" format="uuid">
+  Filter by Level 4 unit
+</ParamField>
+
+<ParamField query="domain" type="enum">
+  Filter by domain
+</ParamField>
+
+<ParamField query="protocolType" type="enum">
+  Filter by protocol
+</ParamField>
+
+<ParamField query="status" type="enum">
+  Filter by status
+</ParamField>
+
+<ParamField query="search" type="string">
+  Search filter
+</ParamField>
+
+<ParamField query="sortBy" type="enum" default="campaignDate">
+  Sort field
+</ParamField>
+
+<ParamField query="sortOrder" type="enum" default="desc">
+  Sort order
+</ParamField>
+
+**Export Columns:**
+- `id` - Campaign ID
+- `campaignCode` - Campaign code
+- `campaignName` - Campaign name
+- `domain` - Asset domain
+- `protocolType` - Protocol type
+- `status` - Campaign status
+- `campaignDate` - Campaign date
+- `level4Id` - Level 4 ID
+- `level4Code` - Level 4 code
+- `level4Name` - Level 4 name
+- `observationCount` - Number of observations
+- `resultCount` - Number of results
+- `jobCount` - Number of calculation jobs
+- `createdAt` - Creation timestamp
+
+<RequestExample>
+```bash cURL
+curl -X GET "https://api.smyeg.com/api/assets/measurement-campaigns/export?format=xlsx&domain=BIOLOGICO&limit=1000" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -o campaigns.xlsx
+```
+</RequestExample>
+
+## Permissions
+
+- **READ** - View campaigns (permission: `asset-measurement:READ`)
+- **CREATE** - Create campaigns and import data (permission: `asset-measurement:CREATE`)
+- **UPDATE** - Modify campaigns (permission: `asset-measurement:UPDATE`)
+- **DELETE** - Delete campaigns (permission: `asset-measurement:DELETE`)
+- **SUPER_ADMIN** - Bypass all permission checks
+
+## Related Endpoints
+
+- [Asset Measurement Observations](/api/assets/observations) - Manage field observations
+- [Asset Calculation Jobs](/api/assets/calculations) - Trigger and monitor calculations

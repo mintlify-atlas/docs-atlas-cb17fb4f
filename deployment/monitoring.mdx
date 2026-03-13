@@ -1,0 +1,414 @@
+---
+title: Monitoring & Logging
+description: Monitor system health, logs, and performance for SMyEG deployment
+---
+
+## Overview
+
+Effective monitoring ensures the SMyEG system runs reliably in production. This guide covers:
+
+- Application and worker logs
+- Health check endpoints
+- PM2 monitoring tools
+- Database performance
+- Alerting strategies
+
+## Application Logs
+
+### Next.js Application
+
+The web application logs to stdout/stderr:
+
+<CodeGroup>
+```bash Development
+npm run dev
+# Logs appear in terminal
+```
+
+```bash Production (Direct)
+npm start 2>&1 | tee app.log
+```
+
+```bash Production (PM2)
+pm2 logs confor-web
+```
+</CodeGroup>
+
+**Log format**:
+```
+[2026-03-13T10:15:23.456Z] INFO  [auth] User admin@example.com logged in
+[2026-03-13T10:16:45.789Z] ERROR [api/upload] Failed to process shapefile: Invalid geometry
+```
+
+### Worker Logs
+
+Both workers log processing activity:
+
+<CodeGroup>
+```bash Geo Worker
+pm2 logs confor-geo-worker
+
+# Sample output:
+# [2026-03-13T14:32:15.456Z] [geo-worker] processed import_jobs=3 recalc_jobs=12 variation_jobs=5
+```
+
+```bash Asset Worker
+pm2 logs confor-asset-worker
+
+# Sample output:
+# [2026-03-13T14:45:17.890Z] [asset-worker] processed calculation_jobs=45
+```
+</CodeGroup>
+
+<Tip>
+  Workers only log when jobs are processed. No output during idle cycles is normal.
+</Tip>
+
+### Log Levels
+
+Set log verbosity with `LOG_LEVEL`:
+
+```bash .env
+LOG_LEVEL=info  # error | warn | info | debug
+```
+
+- **error**: Critical failures only
+- **warn**: Potential issues (e.g., retries, deprecated features)
+- **info**: Normal operations (logins, job completions)
+- **debug**: Detailed diagnostic information
+
+## PM2 Monitoring
+
+### Process Status
+
+View all processes at a glance:
+
+```bash
+pm2 status
+```
+
+Output:
+```
+┌─────┬───────────────────────┬─────────┬─────────┬──────────┬────────┬─────────────┐
+│ id  │ name                  │ mode    │ status  │ cpu      │ memory │ restarts    │
+├─────┼───────────────────────┼─────────┼─────────┼──────────┼────────┼─────────────┤
+│ 0   │ confor-web            │ fork    │ online  │ 2%       │ 512 MB │ 0           │
+│ 1   │ confor-geo-worker     │ fork    │ online  │ 5%       │ 256 MB │ 1           │
+│ 2   │ confor-asset-worker   │ fork    │ online  │ 1%       │ 128 MB │ 0           │
+└─────┴───────────────────────┴─────────┴─────────┴──────────┴────────┴─────────────┘
+```
+
+**Key metrics**:
+- **status**: Should be "online"; "errored" indicates crashes
+- **cpu**: Sustained high usage may indicate inefficiency
+- **memory**: Watch for growth over time (potential leaks)
+- **restarts**: High count suggests instability
+
+### Real-Time Monitoring
+
+Launch interactive dashboard:
+
+```bash
+pm2 monit
+```
+
+Displays:
+- Live CPU and memory graphs
+- Scrolling log output
+- Process metadata (PID, uptime)
+
+**Keyboard shortcuts**:
+- `↑`/`↓`: Navigate between processes
+- `Ctrl+C`: Exit
+
+### Detailed Process Info
+
+Get comprehensive details for a single process:
+
+```bash
+pm2 show confor-web
+```
+
+Includes:
+- Environment variables
+- Working directory
+- Script path and arguments
+- Restart policy
+- Resource limits
+
+## Health Check Endpoints
+
+### API Health Check
+
+The Next.js app should expose a health endpoint:
+
+```bash
+curl http://localhost:3000/api/health
+```
+
+Expected response:
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-03-13T14:30:00.000Z",
+  "database": "connected",
+  "redis": "connected"
+}
+```
+
+<Warning>
+  Implement this endpoint if it doesn't exist. It's critical for load balancer health checks.
+</Warning>
+
+### Database Connectivity
+
+Test PostgreSQL connection:
+
+```bash
+psql $DATABASE_URL -c "SELECT version();"
+```
+
+Or from Node.js:
+
+```typescript
+import { prisma } from '@/lib/prisma';
+
+const isHealthy = await prisma.$queryRaw`SELECT 1`;
+console.log('Database:', isHealthy ? 'connected' : 'disconnected');
+```
+
+### Redis Connectivity
+
+Test Redis connection:
+
+```bash
+redis-cli -u $REDIS_URL ping
+# Expected: PONG
+```
+
+## Database Monitoring
+
+### Active Connections
+
+Monitor connection pool usage:
+
+```sql
+SELECT 
+  COUNT(*) as total_connections,
+  COUNT(*) FILTER (WHERE state = 'active') as active,
+  COUNT(*) FILTER (WHERE state = 'idle') as idle
+FROM pg_stat_activity
+WHERE datname = 'smyeg_production';
+```
+
+<Info>
+  Prisma connection pool defaults to: `connection_limit = num_physical_cpus * 2 + 1`
+</Info>
+
+### Slow Queries
+
+Identify performance bottlenecks:
+
+```sql
+SELECT 
+  query,
+  calls,
+  total_exec_time / 1000 as total_seconds,
+  mean_exec_time / 1000 as avg_seconds
+FROM pg_stat_statements
+ORDER BY mean_exec_time DESC
+LIMIT 10;
+```
+
+<Tip>
+  Enable `pg_stat_statements` extension for query analytics:
+  ```sql
+  CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+  ```
+</Tip>
+
+### Table Sizes
+
+Monitor storage growth:
+
+```sql
+SELECT 
+  schemaname,
+  tablename,
+  pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size
+FROM pg_tables
+WHERE schemaname = 'public'
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+```
+
+### Audit Log Partitions
+
+Check partition sizes (audit logs are partitioned by month):
+
+```sql
+SELECT 
+  tablename,
+  pg_size_pretty(pg_total_relation_size('public.'||tablename)) as size
+FROM pg_tables
+WHERE tablename LIKE 'audit_logs_%'
+ORDER BY tablename DESC;
+```
+
+## Worker Monitoring
+
+### Job Queue Status
+
+Monitor pending jobs:
+
+<CodeGroup>
+```sql Geo Import Jobs
+SELECT 
+  status,
+  COUNT(*) as count,
+  MIN(created_at) as oldest_job
+FROM shapefile_import_jobs
+GROUP BY status;
+```
+
+```sql Asset Calculation Jobs
+SELECT 
+  status,
+  COUNT(*) as count,
+  AVG(EXTRACT(EPOCH FROM (updated_at - created_at))) as avg_duration_seconds
+FROM asset_calculation_jobs
+GROUP BY status;
+```
+</CodeGroup>
+
+**Alerts**:
+- `pending` count growing: Worker may be overwhelmed or stopped
+- `processing` jobs older than 30 minutes: Stuck jobs from crashed worker
+- High `avg_duration_seconds`: Optimization needed
+
+### Worker Performance Metrics
+
+Add custom metrics to worker logs:
+
+```typescript
+const startTime = Date.now();
+const result = await processNextImportJob();
+const duration = Date.now() - startTime;
+
+console.info(`[geo-worker] job ${result.jobId} completed in ${duration}ms`);
+```
+
+Analyze logs for trends:
+
+```bash
+pm2 logs confor-geo-worker | grep "completed in" | awk '{print $NF}'
+```
+
+## Alerting Strategies
+
+### PM2 Plus (Commercial)
+
+PM2 offers a paid monitoring service with:
+
+- Real-time dashboards
+- Email/Slack alerts
+- Historical metrics
+- Log aggregation
+
+**Setup**:
+```bash
+pm2 plus
+# Follow prompts to link account
+```
+
+Learn more: [PM2 Plus](https://pm2.io/)
+
+### Custom Alerting
+
+Implement webhooks for critical events:
+
+```typescript
+// src/lib/alert.ts
+export async function sendAlert(message: string) {
+  await fetch(process.env.SLACK_WEBHOOK_URL, {
+    method: 'POST',
+    body: JSON.stringify({ text: message }),
+  });
+}
+
+// In worker error handler:
+catch (error) {
+  console.error('[geo-worker] batch error', error);
+  await sendAlert(`🚨 Geo worker error: ${error.message}`);
+}
+```
+
+### Uptime Monitoring
+
+Use external services to monitor availability:
+
+- [UptimeRobot](https://uptimerobot.com/)
+- [Pingdom](https://www.pingdom.com/)
+- [Better Uptime](https://betteruptime.com/)
+
+Configure to ping `/api/health` every 5 minutes and alert on failures.
+
+## Log Rotation
+
+### PM2 Log Rotation
+
+Install and configure:
+
+```bash
+pm2 install pm2-logrotate
+
+# Configure rotation
+pm2 set pm2-logrotate:max_size 10M      # Rotate when log reaches 10MB
+pm2 set pm2-logrotate:retain 30         # Keep 30 rotated files
+pm2 set pm2-logrotate:compress true     # Gzip old logs
+pm2 set pm2-logrotate:dateFormat YYYY-MM-DD_HH-mm-ss
+```
+
+### System Logs
+
+For non-PM2 deployments, use `logrotate`:
+
+```bash /etc/logrotate.d/smyeg
+/var/log/smyeg/*.log {
+  daily
+  rotate 30
+  compress
+  delaycompress
+  missingok
+  notifempty
+  create 0640 www-data www-data
+  sharedscripts
+  postrotate
+    systemctl reload nginx > /dev/null 2>&1 || true
+  endscript
+}
+```
+
+## Performance Baselines
+
+Establish normal operating ranges:
+
+| Metric | Normal Range | Alert Threshold |
+|--------|--------------|------------------|
+| Web app CPU | 2-10% | > 50% sustained |
+| Web app memory | 256-512 MB | > 1 GB |
+| Geo worker CPU | 5-20% | > 80% sustained |
+| Geo worker memory | 128-512 MB | > 1 GB |
+| Asset worker CPU | 1-10% | > 50% sustained |
+| Database connections | 5-20 | > 80 (pool limit) |
+| Response time (p95) | < 500ms | > 2s |
+| Job queue depth | 0-100 | > 1000 |
+
+<Note>
+  These baselines vary by workload. Monitor your system for 1-2 weeks to establish accurate thresholds.
+</Note>
+
+## Next Steps
+
+<Card title="Troubleshooting Guide" icon="wrench" href="/deployment/troubleshooting">
+  Review common issues and diagnostic procedures
+</Card>

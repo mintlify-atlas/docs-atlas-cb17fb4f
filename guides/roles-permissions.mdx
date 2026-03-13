@@ -1,0 +1,311 @@
+---
+title: Roles & Permissions
+description: Understanding RBAC system and permission model in SMyEG
+icon: shield
+---
+
+## Overview
+
+SMyEG uses a flexible Role-Based Access Control (RBAC) system. Permissions are organized by **modules** and **actions**, then grouped into **roles** that can be assigned to users.
+
+## Permission Model
+
+### Permission Actions
+
+Every permission consists of a module and an action:
+
+- **CREATE** - Create new records
+- **READ** - View existing records
+- **UPDATE** - Modify existing records
+- **DELETE** - Remove records
+- **EXPORT** - Export data to files
+- **ADMIN** - Full administrative access to the module
+
+### Core Modules
+
+| Module | Description |
+|--------|-------------|
+| `users` | User management |
+| `forest-patrimony` | Land patrimony hierarchy (Level 2-5) |
+| `asset-measurement` | Biological asset measurement campaigns |
+| `config` | System configuration |
+| `audit` | Audit log access |
+
+## System Roles
+
+### SUPER_ADMIN
+
+**Scope**: Cross-organization access
+
+**Capabilities**:
+- Manage all organizations
+- Create and modify system-wide roles
+- Access all modules and data
+- View cross-organization reports
+
+<Warning>
+  SUPER_ADMIN is a system role and cannot be modified or deleted.
+</Warning>
+
+### ADMIN
+
+**Scope**: Single organization
+
+**Capabilities**:
+- Manage users within the organization
+- Create and modify organization-specific roles
+- Full access to all modules within the organization
+- Configure organization settings
+
+### Custom Roles
+
+Organizations can create custom roles tailored to their needs.
+
+## Creating a Custom Role
+
+<Steps>
+  <Step title="Navigate to Roles">
+    Go to **Settings** → **Roles & Permissions**.
+  </Step>
+  
+  <Step title="Click New Role">
+    Click the **Create Role** button.
+  </Step>
+  
+  <Step title="Enter Role Details">
+    Provide:
+    - **Name** - Display name (e.g., "Field Technician")
+    - **Slug** - System identifier (e.g., "FIELD_TECHNICIAN") - auto-generated from name
+    - **Description** - What this role is for
+  </Step>
+  
+  <Step title="Assign Permissions">
+    Select permissions by module:
+    1. Expand each module section
+    2. Check the actions you want to grant
+    3. Use "Select All" for full module access
+  </Step>
+  
+  <Step title="Save the Role">
+    Click **Create** to save the role. It will be immediately available for user assignment.
+  </Step>
+</Steps>
+
+### Example API Request
+
+```json
+{
+  "name": "Field Technician",
+  "slug": "FIELD_TECHNICIAN",
+  "description": "Can record measurements and view patrimony data"
+}
+```
+
+## Updating Role Permissions
+
+Role permissions can be updated at any time:
+
+<Steps>
+  <Step title="Select Role">
+    From the Roles list, click on the role you want to modify.
+  </Step>
+  
+  <Step title="Modify Permissions">
+    Check or uncheck permissions as needed.
+  </Step>
+  
+  <Step title="Save Changes">
+    Click **Update Permissions**. Changes take effect immediately for all users with this role.
+  </Step>
+</Steps>
+
+### Example API Request
+
+```json
+{
+  "roleId": "123e4567-e89b-12d3-a456-426614174000",
+  "permissionIds": [
+    "perm-uuid-1",
+    "perm-uuid-2",
+    "perm-uuid-3"
+  ]
+}
+```
+
+<Warning>
+  Permission changes are applied immediately. Users currently logged in will have updated permissions on their next request.
+</Warning>
+
+## Role Scope and Isolation
+
+### Organization-Scoped Roles
+
+- Custom roles are scoped to the organization that created them
+- A role with `organizationId: "abc123"` can only be assigned to users in organization "abc123"
+- Organizations cannot see or use roles from other organizations
+
+### System Roles
+
+- System roles have `isSystemRole: true` and `organizationId: null`
+- Available to all organizations
+- Cannot be modified or deleted
+- Examples: SUPER_ADMIN, ADMIN
+
+## Permission Checking
+
+The system checks permissions using this logic:
+
+```typescript
+function hasPermission(
+  userPermissions: string[],
+  module: string,
+  action: string
+): boolean {
+  const permissionKey = `${module}:${action}`
+  return userPermissions.includes(permissionKey)
+}
+```
+
+### Permission Format
+
+Permissions are stored as strings in the format:
+```
+module:action
+```
+
+Examples:
+- `users:READ`
+- `forest-patrimony:CREATE`
+- `asset-measurement:EXPORT`
+
+## Common Role Examples
+
+### Field Technician
+
+**Purpose**: Record measurements and view patrimony data
+
+**Permissions**:
+- `forest-patrimony:READ`
+- `asset-measurement:READ`
+- `asset-measurement:CREATE`
+
+### Data Analyst
+
+**Purpose**: View and export all data for reporting
+
+**Permissions**:
+- `forest-patrimony:READ`
+- `forest-patrimony:EXPORT`
+- `asset-measurement:READ`
+- `asset-measurement:EXPORT`
+- `audit:READ`
+
+### Patrimony Manager
+
+**Purpose**: Manage land patrimony and geospatial data
+
+**Permissions**:
+- `forest-patrimony:READ`
+- `forest-patrimony:CREATE`
+- `forest-patrimony:UPDATE`
+- `forest-patrimony:DELETE`
+- `forest-patrimony:EXPORT`
+
+## Best Practices
+
+<Card title="Principle of Least Privilege" icon="shield-check">
+  Grant only the minimum permissions necessary for each role. Start with READ access and add other permissions as needed.
+</Card>
+
+<Card title="Role Naming" icon="tag">
+  Use clear, descriptive names that reflect the job function or responsibility level. Examples: "Field_Technician", "Regional_Manager", "Data_Entry_Clerk".
+</Card>
+
+<Card title="Regular Audits" icon="clock">
+  Periodically review role permissions to ensure they still align with organizational needs and security policies.
+</Card>
+
+<Card title="Document Custom Roles" icon="file-text">
+  Add detailed descriptions to custom roles explaining their purpose and intended use cases.
+</Card>
+
+## Role Assignment
+
+### Assigning Roles to Users
+
+Roles are assigned through the User Management interface:
+
+1. Edit the target user
+2. In the Roles section, click **Add Role**
+3. Select role(s) from the dropdown
+4. Optionally set an expiration date
+5. Save changes
+
+### Multiple Role Assignment
+
+Users can have multiple roles:
+- Permissions are **cumulative** (union of all role permissions)
+- If any assigned role grants a permission, the user has that permission
+- Useful for users with multiple responsibilities
+
+### Temporary Role Assignment
+
+Roles can be assigned with an expiration date:
+- Set `expiresAt` when assigning the role
+- The role assignment automatically becomes inactive after expiration
+- Useful for temporary access or project-based roles
+
+## Validation Rules
+
+### Creating Roles
+
+- Role `name` is required and must be unique within the organization
+- Role `slug` is auto-generated from name (uppercase, underscores)
+- Slug must be unique within the organization
+- System roles (`isSystemRole: true`) cannot be created via API
+
+### Assigning Permissions
+
+- Only valid permission IDs are accepted
+- Invalid permission IDs are silently filtered out
+- Empty permission arrays remove all permissions from the role
+- Permission IDs must exist in the `permissions` table
+
+## Permissions Required
+
+| Action | Required Permission |
+|--------|--------------------|
+| View roles | `users:READ` or ADMIN/SUPER_ADMIN |
+| Create roles | ADMIN or SUPER_ADMIN |
+| Update roles | ADMIN or SUPER_ADMIN |
+| Delete roles | ADMIN or SUPER_ADMIN |
+| Assign permissions | ADMIN or SUPER_ADMIN |
+
+## FAQ
+
+<Accordion title="What happens if I remove a permission from a role?">
+  All users with that role immediately lose that permission. Active sessions continue until the next API request, at which point the new permissions apply.
+</Accordion>
+
+<Accordion title="Can I rename a system role?">
+  No. System roles (SUPER_ADMIN, ADMIN) cannot be modified. Create a custom role instead.
+</Accordion>
+
+<Accordion title="How do I delete a role?">
+  Roles are soft-deleted by setting `isActive: false`. You cannot delete a role that is currently assigned to active users.
+</Accordion>
+
+<Accordion title="What's the difference between ADMIN and SUPER_ADMIN?">
+  ADMIN has full access within a single organization. SUPER_ADMIN has cross-organization access and can manage system-wide settings.
+</Accordion>
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="User Management" icon="users" href="/guides/user-management">
+    Creating and managing user accounts
+  </Card>
+  <Card title="Audit Logs" icon="file-lines" href="/features/analytics">
+    Tracking permission changes and access
+  </Card>
+</CardGroup>

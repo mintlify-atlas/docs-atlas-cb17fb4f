@@ -1,0 +1,74 @@
+---
+title: "Welcome to SMyEG"
+description: "Geospatial Monitoring and Evaluation System for forest and land patrimony management"
+---
+
+## What is SMyEG?
+
+SMyEG (Sistema de Monitoreo y Evaluación Geoespacial) is a comprehensive full-stack platform designed for managing forest and land patrimony with advanced geospatial capabilities. Built for organizations that need to track, monitor, and evaluate land assets across multiple hierarchical levels.
+
+<CardGroup cols={2}>
+  <Card title="Multi-Organization Support" icon="building">
+    Secure tenant isolation with role-based access control for managing multiple organizations
+  </Card>
+  <Card title="Geospatial Processing" icon="map">
+    Import and process shapefiles with automated geometry calculations and validation
+  </Card>
+  <Card title="Asset Measurements" icon="chart-line">
+    Track and analyze biological asset measurements across campaigns and observation periods
+  </Card>
+  <Card title="Background Workers" icon="gears">
+    Automated processing of geospatial imports and recalculations with configurable schedulers
+  </Card>
+</CardGroup>
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Set up SMyEG and create your first organization in minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Complete installation guide with Docker and PM2 deployment options
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/auth/overview">
+    Explore the REST API endpoints for authentication, users, and data management
+  </Card>
+  <Card title="Deployment Guide" icon="server" href="/deployment/overview">
+    Learn how to deploy SMyEG in production with workers and monitoring
+  </Card>
+</CardGroup>
+
+## Core Features
+
+<CardGroup cols={3}>
+  <Card title="Authentication" icon="lock" href="/features/authentication">
+    NextAuth v5 with credentials, password reset, and session management
+  </Card>
+  <Card title="Forest Patrimony" icon="tree" href="/features/forest-patrimony">
+    5-level hierarchical structure for managing forest properties and land units
+  </Card>
+  <Card title="Organizations" icon="users" href="/features/organizations">
+    Multi-tenant architecture with complete data isolation per organization
+  </Card>
+  <Card title="Geospatial Data" icon="globe" href="/features/geospatial-data">
+    Shapefile import, geometry validation, and automated surface calculations
+  </Card>
+  <Card title="Asset Measurements" icon="ruler" href="/features/asset-measurements">
+    Campaign-based measurement tracking with import/export capabilities
+  </Card>
+  <Card title="Analytics" icon="chart-bar" href="/features/analytics">
+    Dashboard with metrics, audit logs, and performance monitoring
+  </Card>
+</CardGroup>
+
+## Technology Stack
+
+SMyEG is built with modern web technologies:
+
+- **Frontend**: Next.js 16, React 19, TypeScript
+- **Backend**: Next.js API Routes, Prisma ORM
+- **Database**: PostgreSQL with PostGIS extensions
+- **Maps**: Leaflet and React Leaflet for geospatial visualization
+- **Authentication**: NextAuth v5
+- **UI**: Tailwind CSS, Radix UI, shadcn/ui components

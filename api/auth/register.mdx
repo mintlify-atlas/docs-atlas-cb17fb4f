@@ -1,0 +1,241 @@
+---
+title: 'Register'
+description: 'Create a new user account'
+api: 'POST /api/auth/register'
+---
+
+## Overview
+
+Register a new user account in SMyEG. New users are automatically assigned to the default organization and given a "USER" role. Accounts are created with `PENDING_VERIFICATION` status and require admin approval before they can log in.
+
+### Endpoint
+
+```
+POST /api/auth/register
+```
+
+## Request
+
+### Request Body
+
+<ParamField body="email" type="string" required>
+  Valid email address. Must be unique across all users.
+  
+  **Validation:** Must be a valid email format.
+</ParamField>
+
+<ParamField body="firstName" type="string" required>
+  User's first name.
+  
+  **Validation:** Minimum 2 characters.
+</ParamField>
+
+<ParamField body="lastName" type="string" required>
+  User's last name.
+  
+  **Validation:** Minimum 2 characters.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User's password.
+  
+  **Validation:**
+  - Minimum 8 characters
+  - At least one uppercase letter (A-Z)
+  - At least one lowercase letter (a-z)
+  - At least one number (0-9)
+</ParamField>
+
+<ParamField body="confirmPassword" type="string" required>
+  Password confirmation. Must match the `password` field exactly.
+</ParamField>
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.smyeg.example/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "jane.doe@example.com",
+    "firstName": "Jane",
+    "lastName": "Doe",
+    "password": "SecurePass123",
+    "confirmPassword": "SecurePass123"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('/api/auth/register', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    email: 'jane.doe@example.com',
+    firstName: 'Jane',
+    lastName: 'Doe',
+    password: 'SecurePass123',
+    confirmPassword: 'SecurePass123',
+  }),
+});
+
+const data = await response.json();
+```
+
+## Response
+
+### Success Response (201)
+
+<ResponseField name="success" type="boolean">
+  Always `true` for successful requests
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  <ResponseField name="message" type="string">
+    Confirmation message indicating the account was created and is pending approval
+  </ResponseField>
+</ResponseField>
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Cuenta creada. Pendiente de aprobacion por un ADMIN."
+  }
+}
+```
+
+### Error Responses
+
+#### Validation Error (400)
+
+```json
+{
+  "success": false,
+  "error": "Datos inválidos",
+  "details": {
+    "fieldErrors": {
+      "email": ["Invalid email"],
+      "password": ["Debe contener al menos una mayúscula"],
+      "confirmPassword": ["Las contraseñas no coinciden"]
+    },
+    "formErrors": []
+  }
+}
+```
+
+Returned when request body fails validation. The `details` object contains field-specific error messages.
+
+**Common validation errors:**
+
+| Field | Error | Reason |
+|-------|-------|--------|
+| `email` | "Invalid email" | Email format is invalid |
+| `firstName` | "String must contain at least 2 character(s)" | First name too short |
+| `lastName` | "String must contain at least 2 character(s)" | Last name too short |
+| `password` | "String must contain at least 8 character(s)" | Password too short |
+| `password` | "Debe contener al menos una mayúscula" | Missing uppercase letter |
+| `password` | "Debe contener al menos una minúscula" | Missing lowercase letter |
+| `password` | "Debe contener al menos un número" | Missing number |
+| `confirmPassword` | "Las contraseñas no coinciden" | Passwords don't match |
+
+#### Email Already Exists (409)
+
+```json
+{
+  "success": false,
+  "error": "El email ya existe"
+}
+```
+
+Returned when the email address is already registered to another user.
+
+## Registration Process
+
+When a user registers, the following steps occur:
+
+1. **Validation** - Request body is validated against the `registerSchema`
+2. **Duplicate Check** - System checks if email already exists
+3. **Organization Assignment** - User is assigned to the "Por defecto" (default) organization
+4. **Role Assignment** - User receives the "USER" role with default permissions
+5. **Password Hashing** - Password is securely hashed using bcrypt
+6. **User Creation** - User record is created with:
+   - `status: "PENDING_VERIFICATION"`
+   - Hashed password
+   - Associated organization and role
+7. **Audit Log** - A CREATE audit log entry is created
+
+### Default Organization
+
+All new users are assigned to the default organization:
+- **Name:** "Por defecto"
+- **Slug:** Generated from organization name
+- **Status:** Active (`isActive: true`)
+
+The default organization is created automatically if it doesn't exist.
+
+### Account Status
+
+New accounts are created with `PENDING_VERIFICATION` status. Users cannot log in until:
+- An administrator changes their status to `ACTIVE`
+- This prevents unauthorized access and allows for account approval workflows
+
+## Validation Schema
+
+The registration endpoint uses Zod for validation:
+
+```typescript
+import { z } from "zod";
+
+const registerSchema = z
+  .object({
+    email: z.string().email(),
+    password: z
+      .string()
+      .min(8)
+      .regex(/[A-Z]/, "Debe contener al menos una mayúscula")
+      .regex(/[a-z]/, "Debe contener al menos una minúscula")
+      .regex(/[0-9]/, "Debe contener al menos un número"),
+    confirmPassword: z.string(),
+    firstName: z.string().min(2),
+    lastName: z.string().min(2),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "Las contraseñas no coinciden",
+    path: ["confirmPassword"],
+  });
+```
+
+## Security Considerations
+
+### Password Storage
+- Passwords are hashed using bcrypt before storage
+- Plain text passwords are never stored
+- Hash strength is configured in the crypto library
+
+### Audit Trail
+All user registrations are logged with:
+- `action: "CREATE"`
+- `entityType: "User"`
+- `entityId`: New user's ID
+- Timestamp
+
+### Email Uniqueness
+Emails must be unique across the entire system. The database enforces this constraint.
+
+## Next Steps
+
+After registration:
+
+1. **Wait for approval** - An administrator must change your status to `ACTIVE`
+2. **Attempt login** - Use the [Login endpoint](/api/auth/login) to authenticate
+3. **Access the system** - Once active, you can access organization resources
+
+<CardGroup cols={2}>
+  <Card title="Login" icon="right-to-bracket" href="/api/auth/login">
+    Authenticate after account approval
+  </Card>
+  <Card title="Password Reset" icon="key" href="/api/auth/password-reset">
+    Reset your password if forgotten
+  </Card>
+</CardGroup>
